@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="css/index.css">
+  <script src="js/index.js" defer></script>
+  <title>Argyle</title>
+</head>
+<body>
+	<h1>Argyle</h1>
+	<form>
+	  <select id="f-vertical-radius">
+	    <option value="3" selected="selected">3</option>
+	    <option value="5">5</option>
+	    <option value="7">7</option>
+	    <option value="9">9</option>
+	  </select>
+	  <select id="f-horizontal-radius">
+	    <option value="3" selected="selected">3</option>
+	    <option value="5">5</option>
+	    <option value="7">7</option>
+	    <option value="9">9</option>
+	  </select>
+	  <select id="f-colors-mode">
+	    <option value="TWO_COLORS">2 colors</option>
+	    <option value="THREE_COLORS">3 colors</option>
+	  </select>
+	  <input id="f-vertical-repetitions" type="number" value="5" />
+    <input id="f-horizontal-repetitions" type="number" value="3" />
+    
+<input id="f-main-color" type="color" value="#ffffff">
+<input id="f-secondary-color" type="color" value="#000000">
+<input id="f-accent-color" type="color" value="#007f00">
+    
+	  <button id="f-draw">Draw</button>
+	</form>
+	<canvas id="myCanvas"></canvas>
+</body>
+</html>

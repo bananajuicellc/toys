@@ -1,0 +1,10 @@
+canvas {
+  /* Modern Browsers */
+  image-rendering: pixelated;
+  
+  /* Safari / WebKit */
+  image-rendering: -webkit-optimize-contrast;
+  
+  /* Fallback for older browsers */
+  image-rendering: crisp-edges;
+}
