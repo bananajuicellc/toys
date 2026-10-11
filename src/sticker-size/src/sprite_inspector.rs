@@ -90,55 +90,54 @@ pub fn has_transparency(image_bytes: &[u8]) -> Result<bool, String> {
 mod tests {
     use std::assert_matches;
 
-use super::*;
+    use super::*;
 
     #[test]
     fn test_find_edges_with_all_filled() {
-       let image = Image::new(256, 256, Rgba::new(255, 0, 0, 255)); 
-       let got = find_edges(&image);
-       for edge in got {
-        let edge = edge.expect("got unexpected fully tranparent row");
-        assert_eq!(edge.left, 0);
-        assert_eq!(edge.right, 255);
-       }
+        let image = Image::new(256, 256, Rgba::new(255, 0, 0, 255));
+        let got = find_edges(&image);
+        for edge in got {
+            let edge = edge.expect("got unexpected fully tranparent row");
+            assert_eq!(edge.left, 0);
+            assert_eq!(edge.right, 255);
+        }
     }
 
     #[test]
     fn test_find_edges_with_empty_rows() {
-       let mut image = Image::new(256, 5, Rgba::new(0, 0, 0, 0)); 
-       ril::draw::Line::new((1, 1), (254, 1), Rgba::new(255, 0, 0, 255)).draw(&mut image);
-       ril::draw::Line::new((128, 2), (129, 2), Rgba::new(255, 0, 0, 255)).draw(&mut image);
-       ril::draw::Line::new((12, 3), (246, 3), Rgba::new(255, 0, 0, 255)).draw(&mut image);
-       
-       let mut got = find_edges(&image).into_iter();
+        let mut image = Image::new(256, 5, Rgba::new(0, 0, 0, 0));
+        ril::draw::Line::new((1, 1), (254, 1), Rgba::new(255, 0, 0, 255)).draw(&mut image);
+        ril::draw::Line::new((128, 2), (129, 2), Rgba::new(255, 0, 0, 255)).draw(&mut image);
+        ril::draw::Line::new((12, 3), (246, 3), Rgba::new(255, 0, 0, 255)).draw(&mut image);
 
-       let first = got.next();
-       assert_matches!(first, Some(None));
-       let second = got.next();
-       if let Some(Some(edge)) = second {
-        assert_eq!(edge.left, 1);
-        assert_eq!(edge.right, 253);
-       } else {
-        panic!("missing 2nd row edges");
-       }
-       let third = got.next();
-       if let Some(Some(edge)) = third {
-        assert_eq!(edge.left, 128);
-        assert_eq!(edge.right, 128);
-       } else {
-        panic!("missing 3rd row edges");
-       }
-       let fourth = got.next();
-       if let Some(Some(edge)) = fourth {
-        assert_eq!(edge.left, 12);
-        assert_eq!(edge.right, 245);
-       } else {
-        panic!("missing 4th row edges");
-       }
-       let last = got.next();
-       assert_matches!(last, Some(None));
-       let end = got.next();
-       assert_matches!(end, None);
-       
+        let mut got = find_edges(&image).into_iter();
+
+        let first = got.next();
+        assert_matches!(first, Some(None));
+        let second = got.next();
+        if let Some(Some(edge)) = second {
+            assert_eq!(edge.left, 1);
+            assert_eq!(edge.right, 253);
+        } else {
+            panic!("missing 2nd row edges");
+        }
+        let third = got.next();
+        if let Some(Some(edge)) = third {
+            assert_eq!(edge.left, 128);
+            assert_eq!(edge.right, 128);
+        } else {
+            panic!("missing 3rd row edges");
+        }
+        let fourth = got.next();
+        if let Some(Some(edge)) = fourth {
+            assert_eq!(edge.left, 12);
+            assert_eq!(edge.right, 245);
+        } else {
+            panic!("missing 4th row edges");
+        }
+        let last = got.next();
+        assert_matches!(last, Some(None));
+        let end = got.next();
+        assert_matches!(end, None);
     }
 }
