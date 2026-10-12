@@ -67,23 +67,84 @@ fn find_edges(image: &Image<Rgba>) -> Vec<Option<Edge>> {
     out
 }
 
-/// Checks if a PNG byte slice contains any transparent pixels using the `ril` crate.
-pub fn has_transparency(image_bytes: &[u8]) -> Result<bool, String> {
-    // 1. Decode explicitly into an RGBA image matrix in-memory
-    let image: Image<Rgba> = Image::from_bytes_inferred(image_bytes)
-        .map_err(|e| format!("Failed to decode PNG via RIL: {e}"))?;
+fn calculate_square_length(left: (i32, i32), right: (i32, i32)) -> f32 {
+    let dx: f32 = 1.0 + (left.0 - right.0) as f32;
+    let dy: f32 = 1.0 + (left.1 - right.1) as f32;
+    dx * dx + dy * dy
+}
 
-    // 2. Walk linearly through the typed pixel representations
-    for row in image.pixels() {
-        for pixel in row {
-            // 'a' is a u8 component representing alpha (0 = transparent, 255 = fully opaque)
-            if pixel.a < 255 {
-                return Ok(true); // Found transparency!
+fn find_longest_dimension(image: &Image<Rgba>) -> Option<Line> {
+    let edges = find_edges(image);
+    let mut max_distance_square = 0.0;
+    let mut max_dimension: Option<Line> = None;
+
+    for (left_y, left) in edges.iter().enumerate() {
+        match left {
+            Some(left) => {
+                let left_x = left.left;
+                for (right_y, right) in edges.iter().enumerate() {
+                    match right {
+                        Some(right) => {
+                            let right_x = right.right;
+                            let distance_square = calculate_square_length(
+                                (left_x, left_y.try_into().expect("image too tall")),
+                                (right_x, right_y.try_into().expect("image too tall")),
+                            );
+                            if distance_square > max_distance_square {
+                                max_distance_square = distance_square;
+                                max_dimension = Some(Line {
+                                    left: Point {
+                                        x: left_x,
+                                        y: left_y.try_into().expect("image too tall"),
+                                    },
+                                    right: Point {
+                                        x: right_x,
+                                        y: right_y.try_into().expect("image too tall"),
+                                    },
+                                });
+                            }
+                        }
+                        None => continue,
+                    }
+                }
             }
+            None => continue,
         }
     }
+    max_dimension
+}
 
-    Ok(false)
+pub fn draw_largest_dimension(image_bytes: &[u8]) -> Result<(Vec<u8>, Option<f32>), String> {
+    let mut image: Image<Rgba> = Image::from_bytes_inferred(image_bytes)
+        .map_err(|e| format!("Failed to decode image via RIL: {e}"))?;
+    let dimension = find_longest_dimension(&image);
+    let measure = match dimension {
+        Some(line) => {
+            ril::draw::Line::new(
+                (
+                    line.left.x.try_into().expect("unexpected negative bounds"),
+                    line.left.y.try_into().expect("unexpected negative bounds"),
+                ),
+                (
+                    line.right.x.try_into().expect("unexpected negative bounds"),
+                    line.right.y.try_into().expect("unexpected negative bounds"),
+                ),
+                Rgba::new(255, 0, 0, 255),
+            )
+            .draw(&mut image);
+            let measure =
+                calculate_square_length((line.left.x, line.left.y), (line.right.x, line.right.y))
+                    .sqrt();
+            Some(measure)
+        }
+        None => None,
+    };
+
+    let mut out = Vec::<u8>::new();
+    image
+        .encode(ImageFormat::Png, &mut out)
+        .map_err(|e| format!("Failed to encode PNG via RIL: {e}"))?;
+    Ok((out, measure))
 }
 
 #[cfg(test)]
