@@ -1,11 +1,13 @@
 use base64::prelude::*;
 use ril::prelude::*;
 
+#[derive(Debug, PartialEq)]
 struct Point {
     x: i32,
     y: i32,
 }
 
+#[derive(Debug, PartialEq)]
 struct Line {
     left: Point,
     right: Point,
@@ -68,13 +70,12 @@ fn find_edges(image: &Image<Rgba>) -> Vec<Option<Edge>> {
 }
 
 fn calculate_square_length(left: (i32, i32), right: (i32, i32)) -> f32 {
-    let dx: f32 = 1.0 + (left.0 - right.0) as f32;
-    let dy: f32 = 1.0 + (left.1 - right.1) as f32;
+    let dx: f32 = (right.0 - left.0).abs() as f32;
+    let dy: f32 = (right.1 - left.1).abs() as f32;
     dx * dx + dy * dy
 }
 
-fn find_longest_dimension(image: &Image<Rgba>) -> Option<Line> {
-    let edges = find_edges(image);
+fn find_longest_dimension(edges: &Vec<Option<Edge>>) -> Option<Line> {
     let mut max_distance_square = 0.0;
     let mut max_dimension: Option<Line> = None;
 
@@ -117,7 +118,8 @@ fn find_longest_dimension(image: &Image<Rgba>) -> Option<Line> {
 pub fn draw_largest_dimension(image_bytes: &[u8]) -> Result<(Vec<u8>, Option<f32>), String> {
     let mut image: Image<Rgba> = Image::from_bytes_inferred(image_bytes)
         .map_err(|e| format!("Failed to decode image via RIL: {e}"))?;
-    let dimension = find_longest_dimension(&image);
+    let edges = find_edges(&image);
+    let dimension = find_longest_dimension(&edges);
     let measure = match dimension {
         Some(line) => {
             ril::draw::Line::new(
@@ -132,9 +134,10 @@ pub fn draw_largest_dimension(image_bytes: &[u8]) -> Result<(Vec<u8>, Option<f32
                 Rgba::new(255, 0, 0, 255),
             )
             .draw(&mut image);
-            let measure =
-                calculate_square_length((line.left.x, line.left.y), (line.right.x, line.right.y))
-                    .sqrt();
+            let measure = calculate_square_length((line.left.x, line.left.y), (line.right.x, line.right.y))
+                    .sqrt()
+                     // Add 1.0 to account for going to the edge of the pixel from the center of each endpoint.
+                    + 1.0;
             Some(measure)
         }
         None => None,
@@ -152,6 +155,11 @@ mod tests {
     use std::assert_matches;
 
     use super::*;
+
+    #[test]
+    fn test_calculate_square_length() {
+        assert_eq!(0.0, calculate_square_length((0, 0), (0, 0)));
+    }
 
     #[test]
     fn test_find_edges_with_all_filled() {
@@ -200,5 +208,22 @@ mod tests {
         assert_matches!(last, Some(None));
         let end = got.next();
         assert_matches!(end, None);
+    }
+
+    #[test]
+    fn test_find_longest_dimension_with_wide_image() {
+        let edges = vec![
+            Some(Edge { left: 2, right: 2 }),
+            Some(Edge { left: 0, right: 4 }),
+            Some(Edge { left: 2, right: 2 }),
+        ];
+        let got = find_longest_dimension(&edges);
+        assert_eq!(
+            got,
+            Some(Line {
+                left: Point { x: 0, y: 1 },
+                right: Point { x: 4, y: 1 }
+            })
+        );
     }
 }
