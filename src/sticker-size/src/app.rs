@@ -58,6 +58,27 @@ pub fn FileInspector() -> impl IntoView {
     view! {
         <div>
             <input type="file" accept="image/png,image/gif" on:change=on_file_change />
+            // Placeholder for desired sticker size.
+            <input type="number" />
+            // Placeholder for sticker size units.
+            <select>
+                <option>Inches</option>
+                <option>Centimeters</option>
+            </select>
+            // Placeholder for sheet width, height, and units.
+            <input type="number" />
+            <input type="number" />
+            <select>
+                <option>Inches</option>
+                <option>Centimeters</option>
+            </select>
+            // Placeholder for printer DPI / dpmm.
+            <input type="number" />
+            <select>
+                <option>DPI</option>
+                <option>dpmm</option>
+            </select>
+            // TODO: output pixel art canvas size
             {move || dimension_length.get().map(|dimension_length| {
                 view! { <p style="color: green"> {{ dimension_length }} </p> }
             })}
