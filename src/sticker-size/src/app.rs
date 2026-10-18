@@ -59,7 +59,8 @@ pub fn FileInspector() -> impl IntoView {
         <div>
             <input type="file" accept="image/png,image/gif" on:change=on_file_change />
             // Placeholder for desired sticker size.
-            <input type="number" />
+            <label for="sticker-size">Sticker Size</label>
+            <input type="number" name="sticker-size" />
             // Placeholder for sticker size units.
             <select>
                 <option>Inches</option>
