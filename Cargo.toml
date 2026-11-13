@@ -1,0 +1,3 @@
+[workspace]
+members = ["src/sticker-size"]
+resolver = "3"
