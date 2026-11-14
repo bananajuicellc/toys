@@ -1,8 +1,11 @@
 # `puzzle-gen`: Four-Stage Laser Jigsaw Puzzle Generator
 
 *   **Author:** Tim Sweña (Swast)
-*   **Status:** Draft
+*   **Status:** Superseded in part (Stage 3 & 4 layout superseded by [`puzzle-gen-nesting.md`](./puzzle-gen-nesting.md))
 *   **Date:** 2026-11-13
+
+> [!NOTE]
+> Stages 3 & 4 pagination, default sheet size, registration mark compaction, and nesting optimization have been superseded by [`puzzle-gen-nesting.md`](./puzzle-gen-nesting.md). Stages 0, 1, and 2 geometry, tab splicing, offsetting, and CLI architecture remain governed by this document.
 
 --------------------------------------------------------------------------------
 
@@ -14,8 +17,8 @@ Starting from an unjoined Stage 0 Inkscape SVG containing the required `Image`, 
 
 1.  **Stage 1 (`<prefix>-stage1.svg`):** Matches and splices each shared tab curve into its two adjacent clockwise piece boundaries (removing the replaced straight interior edge across each tab neck), fills every piece with a `2x2` mirrored `<pattern>` built from the single embedded `<image>`, outlines each piece (`#000000`, `0.1 mm` stroke), and renders row and column index labels (`0..rows-1`, `0..cols-1`) in a `GridLabels` layer.
 2.  **Stage 2 (`<prefix>-stage2.svg`):** Flattens piece curves into polylines, heals cross-edge Bezier overshoot loops via polygon self-union, offsets each piece outward by `kerf / 2` for laser cut paths and `print_bleed` for print fills, spaces cut pieces apart on a uniform bounding-box grid while locking each piece's image pattern to its original artwork coordinates, and aligns `GridLabels` along the spaced grid.
-3.  **Stage 3 (`<prefix>-stage3.svg`):** Reflows pieces in row-major order across Inkscape `<inkscape:page>` sheets inside configured margins and corner registration bands for Inkscape multi-page PDF export. Printed pieces render with `stroke: none` using the outward `print_bleed` contour, paired with stroked vector page numbers and right-angle corner registration ticks (`#000000`, `0.1 mm` stroke) in top-left and bottom-right corner bands.
-4.  **Stage 4 (`<prefix>-stage4-page<N>.svg`):** Emits one standalone single-page SVG per page in `page_unit` (default `mm`) with ungrouped, transform-free page-local `kerf / 2` cut paths (`Cut` layer, `#000000`, `0.1 mm` stroke) and identical top-left and bottom-right vector page numbers and corner registration ticks (`PageNumbers` layer, `score_color`, `0.1 mm` stroke), omitting all `<defs>`, `<pattern>`, and `<image>` elements.
+3.  **Stage 3 (`<prefix>-stage3.svg`):** Places pieces across Inkscape `<inkscape:page>` sheets inside configured margins and corner registration bands for Inkscape multi-page PDF export (initially uniform grid pagination, superseded by irregular nesting and compaction in [`puzzle-gen-nesting.md`](./puzzle-gen-nesting.md)). Printed pieces render with `stroke: none` using the outward `print_bleed` contour, paired with stroked vector page numbers and right-angle corner registration ticks (`#000000`, `0.1 mm` stroke) in top-left and bottom-right corner bands.
+4.  **Stage 4 (`<prefix>-stage4-page<N>.svg`):** Emits one standalone single-page SVG per page in `page_unit` (default `mm`) with ungrouped, transform-free page-local `kerf / 2` cut paths (`Cut` layer, `#000000`, `0.1 mm` stroke) and identical top-left and bottom-right vector page numbers and corner registration ticks (`PageNumbers` layer, `score_color`, `0.1 mm` stroke), omitting all `<defs>`, `<pattern>`, and `<image>` elements. Note that default `page_size` has been updated to `8.5in x 11in` (superseding the initial `6in x 6in` default; see [`puzzle-gen-nesting.md`](./puzzle-gen-nesting.md)).
 
 ## The Problem
 
