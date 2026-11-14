@@ -697,3 +697,26 @@ fn bounded_early_snapping_and_edge_cases() {
     let color_err = Config::from_yaml(Some("score_color: #0000ff\n")).unwrap_err();
     assert!(color_err.to_string().contains("\"#RRGGBB\""));
 }
+
+#[test]
+fn south_pond_example_dry_run_no_strict_succeeds() {
+    let bin = env!("CARGO_BIN_EXE_puzzle-gen");
+    let svg_path =
+        crate_dir().join("examples/south-pond-four-seasons-50x70cm-1000piece-stage0.svg");
+    let out = Command::new(bin)
+        .arg(&svg_path)
+        .arg("--dry-run")
+        .arg("--no-strict")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("grid=26x39"), "stdout: {stdout}");
+    assert!(stdout.contains("matched_tabs=1961"), "stdout: {stdout}");
+    assert!(stdout.contains("missing_tabs=2"), "stdout: {stdout}");
+    assert!(stdout.contains("pages=113"), "stdout: {stdout}");
+}
