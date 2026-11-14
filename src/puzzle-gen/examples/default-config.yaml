@@ -12,16 +12,16 @@ page_unit: "mm"
 margin: "0.25in"
 
 # Laser beam kerf width; cut contours expand outward by kerf / 2.
-kerf: "0.18mm"
+kerf: "0.15mm"
 
 # Maximum chord length for flattened curve segments (supports "<multiplier> kerf" or scalar length >= 0.02mm).
 segment_length: "1 kerf"
 
 # Minimum clearance between neighboring piece contours across Stages 2-4.
-piece_spacing: "1 kerf"
+piece_spacing: "2 kerf"
 
 # Outward artwork fill bleed on Stage 3 print pieces (supports "<multiplier> kerf" or scalar length).
-print_bleed: "1 kerf"
+print_bleed: "2 kerf"
 
 # Vector stroke color for Stage 4 PageNumbers layer (must be quoted in YAML so '#' is not a comment).
 score_color: "#0000ff"
