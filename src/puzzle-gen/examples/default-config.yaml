@@ -1,0 +1,27 @@
+# Default configuration for puzzle-gen.
+# All lengths support mm, cm, in, or px (96 DPI).
+version: 1
+
+# Sheet dimensions (<width> x <height>) for Stage 3 print pages and Stage 4 cut sheets.
+page_size: "6in x 6in"
+
+# Output document unit for Stage 4 standalone cut files (mm, cm, in, or px).
+page_unit: "mm"
+
+# Outer margin inset on every edge of each sheet.
+margin: "0.25in"
+
+# Laser beam kerf width; cut contours expand outward by kerf / 2.
+kerf: "0.18mm"
+
+# Maximum chord length for flattened curve segments (supports "<multiplier> kerf" or scalar length >= 0.02mm).
+segment_length: "1 kerf"
+
+# Minimum spacing between neighboring piece bounding-box slots across Stages 2-4.
+piece_spacing: "1 kerf"
+
+# Outward artwork fill bleed on Stage 3 print pieces (supports "<multiplier> kerf" or scalar length).
+print_bleed: "1 kerf"
+
+# Vector stroke color for Stage 4 PageNumbers layer (must be quoted in YAML so '#' is not a comment).
+score_color: "#0000ff"
