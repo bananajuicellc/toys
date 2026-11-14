@@ -42,6 +42,7 @@ pub fn heal_and_offset(
         frame: spliced.frame,
         image_href: spliced.image_href.clone(),
         image_bounds_mm: spliced.image_bounds_mm,
+        puzzle_bounds_mm: spliced.puzzle_bounds_mm,
         image_preserve_aspect_ratio: spliced.image_preserve_aspect_ratio.clone(),
         image_rendering: spliced.image_rendering.clone(),
         rows: spliced.rows,
@@ -52,11 +53,31 @@ pub fn heal_and_offset(
     })
 }
 
-fn outline_options_i64() -> OverlayOptions<f64, i64> {
+pub(crate) fn outline_options_i64() -> OverlayOptions<f64, i64> {
     let mut opts = OverlayOptions::<f64, i64>::default();
     opts.min_output_area = 1e-6;
     opts.clean_result = true;
     opts
+}
+
+pub(crate) fn select_outer_ring(
+    shapes: Vec<Vec<Vec<[f64; 2]>>>,
+    interior_pt: Point,
+) -> Option<Vec<Point>> {
+    shapes
+        .into_iter()
+        .filter_map(|mut shape| {
+            if shape.is_empty() {
+                return None;
+            }
+            let outer_ring = ring_from_io(&shape.swap_remove(0));
+            if signed_area(&outer_ring) > 0.0 && point_in_polygon(interior_pt, &outer_ring) {
+                Some(outer_ring)
+            } else {
+                None
+            }
+        })
+        .max_by(|a, b| signed_area(a).total_cmp(&signed_area(b)))
 }
 
 fn process_piece(sp: &SplicedPiece, config: &Config) -> Result<KerfedPiece, PipelineError> {
@@ -117,29 +138,15 @@ fn process_piece(sp: &SplicedPiece, config: &Config) -> Result<KerfedPiece, Pipe
         })?;
         let style = OutlineStyle::new(config.print_bleed_mm).line_join(LineJoin::Round(0.1));
         let shapes = healed_io.outline_custom_as::<i64>(&style, outline_options_i64());
-        let outer = shapes
-            .into_iter()
-            .filter_map(|mut shape| {
-                if shape.is_empty() {
-                    return None;
-                }
-                let outer_ring = ring_from_io(&shape.swap_remove(0));
-                if signed_area(&outer_ring) > 0.0 && point_in_polygon(interior_pt, &outer_ring) {
-                    Some(outer_ring)
-                } else {
-                    None
-                }
-            })
-            .max_by(|a, b| signed_area(a).total_cmp(&signed_area(b)))
-            .ok_or_else(|| {
-                PipelineError::new(
-                    "stage2",
-                    format!(
-                        "print_bleed offsetting (+{:.4} mm) collapsed piece ({}, {}) id=\"{}\"",
-                        config.print_bleed_mm, sp.row, sp.col, sp.id
-                    ),
-                )
-            })?;
+        let outer = select_outer_ring(shapes, interior_pt).ok_or_else(|| {
+            PipelineError::new(
+                "stage2",
+                format!(
+                    "print_bleed offsetting (+{:.4} mm) collapsed piece ({}, {}) id=\"{}\"",
+                    config.print_bleed_mm, sp.row, sp.col, sp.id
+                ),
+            )
+        })?;
 
         let simplified = simplify_closed_ring_rdp(&outer, rdp_tol);
         let bleed_area = signed_area(&simplified);
@@ -417,7 +424,7 @@ fn rdp_open(pts: &[Point], tol: f64) -> Vec<Point> {
     }
 }
 
-fn perp_dist_point_segment(p: Point, a: Point, b: Point) -> f64 {
+pub(crate) fn perp_dist_point_segment(p: Point, a: Point, b: Point) -> f64 {
     let ab = b - a;
     let len2 = ab.hypot2();
     if len2 <= 1e-18 {
@@ -428,7 +435,7 @@ fn perp_dist_point_segment(p: Point, a: Point, b: Point) -> f64 {
     p.distance(proj)
 }
 
-fn find_interior_point(ring: &[Point]) -> Option<Point> {
+pub(crate) fn find_interior_point(ring: &[Point]) -> Option<Point> {
     let aabb = polygon_aabb(ring)?;
     let h = aabb.height();
     for &frac in &[0.5, 0.375, 0.625, 0.25, 0.75, 0.125, 0.875] {

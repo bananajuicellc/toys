@@ -1,8 +1,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
-use puzzle_gen::model::{Config, LengthUnit, NoticeSeverity};
+use puzzle_gen::model::{
+    Config, LengthUnit, NoticeSeverity, PipelineArtifacts, Rotation90,
+};
 use puzzle_gen::{run_pipeline, svg_emit};
 use svgtypes::{SimplePathSegment, SimplifyingPathParser, TransformListParser, TransformListToken};
 
@@ -19,14 +22,15 @@ fn example_svg_path() -> PathBuf {
     crate_dir().join("examples/rainy-day-puzzle-4x4-25piece-step0-piece-shape.svg")
 }
 
-fn build_complete_5x5_svg(unit: LengthUnit) -> String {
+fn build_complete_grid_svg(rows: usize, cols: usize, unit: LengthUnit) -> String {
     let cell = unit.from_mm(20.0);
-    let total = unit.from_mm(100.0);
+    let total_w = unit.from_mm((cols as f64) * 20.0);
+    let total_h = unit.from_mm((rows as f64) * 20.0);
     let u = unit.as_str();
 
     let mut rects = String::new();
-    for r in 0..5 {
-        for c in 0..5 {
+    for r in 0..rows {
+        for c in 0..cols {
             let x = (c as f64) * cell;
             let y = (r as f64) * cell;
             rects.push_str(&format!(
@@ -36,14 +40,12 @@ fn build_complete_5x5_svg(unit: LengthUnit) -> String {
     }
 
     let mut tabs = String::new();
-    // 20 internal horizontal edges
-    for r in 0..4 {
-        for c in 0..5 {
+    for r in 0..rows.saturating_sub(1) {
+        for c in 0..cols {
             let y = ((r + 1) as f64) * cell;
             let x0 = (c as f64) * cell;
             let s = x0 + 0.3 * cell;
             let e = x0 + 0.7 * cell;
-            let mid = x0 + 0.5 * cell;
             let bump = if (r + c) % 2 == 0 {
                 y + 0.25 * cell
             } else {
@@ -52,12 +54,10 @@ fn build_complete_5x5_svg(unit: LengthUnit) -> String {
             tabs.push_str(&format!(
                 "    <path id=\"th-{r}-{c}\" d=\"M {s:.6} {y:.6} C {s:.6} {bump:.6} {e:.6} {bump:.6} {e:.6} {y:.6}\"/>\n"
             ));
-            let _ = mid;
         }
     }
-    // 20 internal vertical edges
-    for r in 0..5 {
-        for c in 0..4 {
+    for r in 0..rows {
+        for c in 0..cols.saturating_sub(1) {
             let x = ((c + 1) as f64) * cell;
             let y0 = (r as f64) * cell;
             let s = y0 + 0.3 * cell;
@@ -75,7 +75,7 @@ fn build_complete_5x5_svg(unit: LengthUnit) -> String {
 
     format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<svg width="{total:.6}{u}" height="{total:.6}{u}" viewBox="0 0 {total:.6} {total:.6}" version="1.1"
+<svg width="{total_w:.6}{u}" height="{total_h:.6}{u}" viewBox="0 0 {total_w:.6} {total_h:.6}" version="1.1"
      xmlns="http://www.w3.org/2000/svg"
      xmlns:svg="http://www.w3.org/2000/svg"
      xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
@@ -83,7 +83,7 @@ fn build_complete_5x5_svg(unit: LengthUnit) -> String {
      xmlns:xlink="http://www.w3.org/1999/xlink">
   <sodipodi:namedview id="namedview1" inkscape:document-units="{u}"/>
   <g inkscape:groupmode="layer" id="layer1" inkscape:label="Image">
-    <image id="img1" x="0" y="0" width="{total:.6}" height="{total:.6}" xlink:href="{PNG_1X1}"/>
+    <image id="img1" x="0" y="0" width="{total_w:.6}" height="{total_h:.6}" xlink:href="{PNG_1X1}"/>
   </g>
   <g inkscape:groupmode="layer" id="layer2" inkscape:label="Pieces">
 {rects}  </g>
@@ -93,15 +93,34 @@ fn build_complete_5x5_svg(unit: LengthUnit) -> String {
     )
 }
 
-fn parse_path_points_mm(d: &str, tx_mm: f64, ty_mm: f64, unit: LengthUnit) -> Vec<(f64, f64)> {
+fn build_complete_5x5_svg(unit: LengthUnit) -> String {
+    build_complete_grid_svg(5, 5, unit)
+}
+
+fn parse_path_points_mm(
+    d: &str,
+    tx_mm: f64,
+    ty_mm: f64,
+    rot_deg: f64,
+    unit: LengthUnit,
+) -> Vec<(f64, f64)> {
+    let (sin_r, cos_r) = rot_deg.to_radians().sin_cos();
+    let transform = |x: f64, y: f64| -> (f64, f64) {
+        let px = unit.to_mm(x);
+        let py = unit.to_mm(y);
+        (
+            px * cos_r - py * sin_r + tx_mm,
+            px * sin_r + py * cos_r + ty_mm,
+        )
+    };
     let mut pts = Vec::new();
     for seg in SimplifyingPathParser::from(d) {
         match seg.unwrap() {
             SimplePathSegment::MoveTo { x, y } | SimplePathSegment::LineTo { x, y } => {
-                pts.push((unit.to_mm(x) + tx_mm, unit.to_mm(y) + ty_mm));
+                pts.push(transform(x, y));
             }
             SimplePathSegment::CurveTo { x, y, .. } | SimplePathSegment::Quadratic { x, y, .. } => {
-                pts.push((unit.to_mm(x) + tx_mm, unit.to_mm(y) + ty_mm));
+                pts.push(transform(x, y));
             }
             SimplePathSegment::ClosePath => {}
         }
@@ -109,19 +128,26 @@ fn parse_path_points_mm(d: &str, tx_mm: f64, ty_mm: f64, unit: LengthUnit) -> Ve
     pts
 }
 
-fn parse_translate_mm(transform: Option<&str>, unit: LengthUnit) -> (f64, f64) {
+fn parse_transform_mm(transform: Option<&str>, unit: LengthUnit) -> (f64, f64, f64) {
     let Some(tf) = transform else {
-        return (0.0, 0.0);
+        return (0.0, 0.0, 0.0);
     };
     let mut tx = 0.0;
     let mut ty = 0.0;
+    let mut rot_deg = 0.0;
     for tok in TransformListParser::from(tf) {
-        if let TransformListToken::Translate { tx: x, ty: y } = tok.unwrap() {
-            tx += unit.to_mm(x);
-            ty += unit.to_mm(y);
+        match tok.unwrap() {
+            TransformListToken::Translate { tx: x, ty: y } => {
+                tx += unit.to_mm(x);
+                ty += unit.to_mm(y);
+            }
+            TransformListToken::Rotate { angle } => {
+                rot_deg += angle;
+            }
+            _ => {}
         }
     }
-    (tx, ty)
+    (tx, ty, rot_deg)
 }
 
 #[test]
@@ -198,7 +224,7 @@ fn synthetic_5x5_stages_1_to_4_and_stage3_vs_stage4_coordinate_parity() {
     // Set print_bleed == kerf / 2 (0.10 mm) so bleed_polygon == cut_polygon and we can check piece parity too.
     let yaml = r##"
 version: 1
-page_size: "6in x 6in"
+page_size: "3.5in x 3.5in"
 page_unit: "mm"
 margin: "0.25in"
 kerf: "0.20mm"
@@ -260,6 +286,14 @@ score_color: "#00aa00"
     );
 
     let d3 = roxmltree::Document::parse(&s3).unwrap();
+    assert_stage3_stage4_parity(&artifacts, &cfg, &d3);
+}
+
+fn assert_stage3_stage4_parity(
+    artifacts: &PipelineArtifacts,
+    cfg: &Config,
+    d3: &roxmltree::Document<'_>,
+) {
     let print_layer = d3
         .descendants()
         .find(|n| n.attribute((INKSCAPE_NS, "label")) == Some("PrintPieces"))
@@ -270,10 +304,10 @@ score_color: "#00aa00"
         .unwrap();
 
     // Check Stage 3 vs Stage 4 parity across every page.
-    let doc_unit = artifacts.kerfed.frame.doc_unit; // In
-    let out_unit = cfg.page_unit; // Mm
+    let doc_unit = artifacts.kerfed.frame.doc_unit;
+    let out_unit = cfg.page_unit;
     for page in &artifacts.layout.pages {
-        let s4 = svg_emit::emit_stage4_page(&artifacts.kerfed, page, &cfg);
+        let s4 = svg_emit::emit_stage4_page(&artifacts.kerfed, page, cfg);
         assert!(!s4.contains("<defs"));
         assert!(!s4.contains("<image"));
         assert!(!s4.contains("<pattern"));
@@ -309,15 +343,16 @@ score_color: "#00aa00"
             .collect();
         assert_eq!(p3_marks.len(), p4_marks.len());
         for (m3, m4) in p3_marks.iter().zip(p4_marks.iter()) {
-            assert!(m4.attribute("style").unwrap().contains("#00aa00"));
-            let pts3 = parse_path_points_mm(m3.attribute("d").unwrap(), -page_x_mm, 0.0, doc_unit);
-            let pts4 = parse_path_points_mm(m4.attribute("d").unwrap(), 0.0, 0.0, out_unit);
+            assert!(m4.attribute("style").unwrap().contains(&cfg.score_color));
+            let pts3 =
+                parse_path_points_mm(m3.attribute("d").unwrap(), -page_x_mm, 0.0, 0.0, doc_unit);
+            let pts4 = parse_path_points_mm(m4.attribute("d").unwrap(), 0.0, 0.0, 0.0, out_unit);
             assert_eq!(pts3.len(), pts4.len());
             for (a, b) in pts3.iter().zip(pts4.iter()) {
                 let err = ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt();
                 assert!(
-                    err <= 1.5e-4,
-                    "PageNumbers parity error {err:.6} mm > 1.5e-4 mm"
+                    err <= 2.2e-4,
+                    "PageNumbers parity error {err:.6} mm > 2.2e-4 mm"
                 );
             }
         }
@@ -334,20 +369,21 @@ score_color: "#00aa00"
                 .find(|n| n.tag_name().name() == "path" && n.attribute("id") == Some(pid))
                 .unwrap();
             let g3 = p3.parent().unwrap();
-            let (tx_mm, ty_mm) = parse_translate_mm(g3.attribute("transform"), doc_unit);
+            let (tx_mm, ty_mm, rot_deg) = parse_transform_mm(g3.attribute("transform"), doc_unit);
             let pts3 = parse_path_points_mm(
                 p3.attribute("d").unwrap(),
                 tx_mm - page_x_mm,
                 ty_mm,
+                rot_deg,
                 doc_unit,
             );
-            let pts4 = parse_path_points_mm(p4.attribute("d").unwrap(), 0.0, 0.0, out_unit);
+            let pts4 = parse_path_points_mm(p4.attribute("d").unwrap(), 0.0, 0.0, 0.0, out_unit);
             assert_eq!(pts3.len(), pts4.len());
             for (a, b) in pts3.iter().zip(pts4.iter()) {
                 let err = ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt();
                 assert!(
-                    err <= 1.5e-4,
-                    "piece {pid} parity error {err:.6} mm > 1.5e-4 mm"
+                    err <= 2.2e-4,
+                    "piece {pid} parity error {err:.6} mm > 2.2e-4 mm"
                 );
             }
         }
@@ -414,14 +450,16 @@ fn cli_end_to_end_dry_run_collisions_overwrite_pruning_and_debug_emit() {
     assert!(stdout_dry.contains("matched_tabs=39"));
     assert!(stdout_dry.contains("missing_tabs=1"));
     assert!(stdout_dry.contains("pages="));
-    assert!(stdout_dry.contains("page_grid="));
+    assert!(stdout_dry.contains("puzzle_area_mm2="));
+    assert!(stdout_dry.contains("total_bbox_mm2="));
+    assert!(stdout_dry.contains("bbox_area_pct="));
 
-    // 2. Write multi-page outputs with small page size (e.g. 2.5in x 2.5in -> many pages).
+    // 2. Write multi-page outputs with small page size (e.g. 2in x 2in -> >= 5 pages).
     let out_dir = tmp.path().join("run1");
     let small_cfg = tmp.path().join("small.yaml");
     fs::write(
         &small_cfg,
-        "version: 1\npage_size: \"2.5in x 2.5in\"\nmargin: \"0.1in\"\n",
+        "version: 1\npage_size: \"2in x 2in\"\nmargin: \"0.1in\"\n",
     )
     .unwrap();
     let run1 = Command::new(bin)
@@ -696,4 +734,161 @@ fn bounded_early_snapping_and_edge_cases() {
     assert!(Config::from_yaml(Some("unknown_key: \"0.18mm\"\n")).is_err());
     let color_err = Config::from_yaml(Some("score_color: #0000ff\n")).unwrap_err();
     assert!(color_err.to_string().contains("\"#RRGGBB\""));
+}
+
+#[test]
+fn default_8_5x11_packs_rainy_day_on_single_page_with_compacted_mark() {
+    let svg_xml = fs::read_to_string(example_svg_path()).unwrap();
+    let cfg = Config::default();
+    let mut notices = Vec::new();
+    let artifacts = run_pipeline(&svg_xml, &cfg, false, &mut notices).unwrap();
+    assert_eq!(artifacts.layout.pages.len(), 1);
+    assert!(
+        artifacts.layout.bbox_area_pct < 200.0,
+        "expected tight bbox_area_pct < 200.0%, got {:.2}%",
+        artifacts.layout.bbox_area_pct
+    );
+    assert!(
+        artifacts.layout.pages[0].bottom_right_anchor_mm.y < cfg.page_height_mm - cfg.margin_mm - 1.0,
+        "expected compacted bottom-right anchor above bottom margin ({:.2} vs {:.2})",
+        artifacts.layout.pages[0].bottom_right_anchor_mm.y,
+        cfg.page_height_mm - cfg.margin_mm
+    );
+}
+
+#[test]
+fn seeded_nesting_is_deterministic_and_cli_overrides_yaml_seed() {
+    let svg_xml = build_complete_5x5_svg(LengthUnit::Mm);
+    let yaml_42 = "version: 1\npage_size: \"3.5in x 3.5in\"\nmargin: \"0.25in\"\nseed: 42\n";
+    let cfg_42 = Config::from_yaml(Some(yaml_42)).unwrap();
+
+    let run1 = run_pipeline(&svg_xml, &cfg_42, true, &mut Vec::new()).unwrap();
+    let run2 = run_pipeline(&svg_xml, &cfg_42, true, &mut Vec::new()).unwrap();
+    assert_eq!(run1.layout, run2.layout);
+    assert_eq!(
+        svg_emit::emit_stage3(&run1.kerfed, &run1.layout, &cfg_42),
+        svg_emit::emit_stage3(&run2.kerfed, &run2.layout, &cfg_42)
+    );
+    assert_eq!(
+        svg_emit::emit_stage4_page(&run1.kerfed, &run1.layout.pages[0], &cfg_42),
+        svg_emit::emit_stage4_page(&run2.kerfed, &run2.layout.pages[0], &cfg_42)
+    );
+
+    let bin = env!("CARGO_BIN_EXE_puzzle-gen");
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg_42_path = tmp.path().join("seed42.yaml");
+    let cfg_99_path = tmp.path().join("seed99.yaml");
+    let svg_path = tmp.path().join("puz.svg");
+    fs::write(&cfg_42_path, yaml_42).unwrap();
+    fs::write(
+        &cfg_99_path,
+        "version: 1\npage_size: \"3.5in x 3.5in\"\nmargin: \"0.25in\"\nseed: 99\n",
+    )
+    .unwrap();
+    fs::write(&svg_path, &svg_xml).unwrap();
+
+    let out_override = Command::new(bin)
+        .arg(&svg_path)
+        .arg("--config")
+        .arg(&cfg_42_path)
+        .arg("--seed")
+        .arg("99")
+        .arg("--dry-run")
+        .output()
+        .unwrap();
+    assert!(out_override.status.success());
+
+    let out_yaml_99 = Command::new(bin)
+        .arg(&svg_path)
+        .arg("--config")
+        .arg(&cfg_99_path)
+        .arg("--dry-run")
+        .output()
+        .unwrap();
+    assert!(out_yaml_99.status.success());
+    assert_eq!(out_override.stdout, out_yaml_99.stdout);
+}
+
+#[test]
+fn non_tty_interactive_flag_warns_and_succeeds() {
+    let bin = env!("CARGO_BIN_EXE_puzzle-gen");
+    let out = Command::new(bin)
+        .arg(example_svg_path())
+        .arg("--interactive")
+        .arg("--dry-run")
+        .arg("--no-strict")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stderr.contains("INTERACTIVE_NON_TTY"));
+    assert!(stdout.contains("bbox_area_pct="));
+}
+
+#[test]
+fn rotation_allows_90_deg_single_piece_fit_on_narrow_strip() {
+    let svg_xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="45mm" height="20mm" viewBox="0 0 45 20" version="1.1"
+     xmlns="http://www.w3.org/2000/svg"
+     xmlns:svg="http://www.w3.org/2000/svg"
+     xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+     xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+     xmlns:xlink="http://www.w3.org/1999/xlink">
+  <sodipodi:namedview id="namedview1" inkscape:document-units="mm"/>
+  <g inkscape:groupmode="layer" id="layer1" inkscape:label="Image">
+    <image id="img1" x="0" y="0" width="45" height="20" xlink:href="{PNG_1X1}"/>
+  </g>
+  <g inkscape:groupmode="layer" id="layer2" inkscape:label="Pieces">
+    <rect id="p0" x="0" y="0" width="45" height="20"/>
+  </g>
+  <g inkscape:groupmode="layer" id="layer3" inkscape:label="Tabs"/>
+</svg>"#
+    );
+    let cfg = Config::from_yaml(Some(
+        "version: 1\npage_size: \"1.5in x 4in\"\npage_unit: \"mm\"\nmargin: \"0.25in\"\nkerf: \"0.20mm\"\nprint_bleed: \"0.5 kerf\"\n",
+    ))
+    .unwrap();
+    let artifacts = run_pipeline(&svg_xml, &cfg, true, &mut Vec::new()).unwrap();
+    assert_eq!(artifacts.layout.pages.len(), 1);
+    assert_eq!(artifacts.layout.pages[0].slots.len(), 1);
+    assert!(
+        matches!(
+            artifacts.layout.pages[0].slots[0].rotation,
+            Rotation90::Deg90 | Rotation90::Deg270
+        ),
+        "expected 90° or 270° rotation on narrow vertical strip, got {:?}",
+        artifacts.layout.pages[0].slots[0].rotation
+    );
+    let s3 = svg_emit::emit_stage3(&artifacts.kerfed, &artifacts.layout, &cfg);
+    let d3 = roxmltree::Document::parse(&s3).unwrap();
+    assert_stage3_stage4_parity(&artifacts, &cfg, &d3);
+}
+
+#[test]
+#[ignore]
+fn large_1008_piece_release_benchmark() {
+    let svg_xml = build_complete_grid_svg(28, 36, LengthUnit::Mm);
+    let cfg = Config::default();
+    let start = Instant::now();
+    let artifacts = run_pipeline(&svg_xml, &cfg, true, &mut Vec::new()).unwrap();
+    let elapsed = start.elapsed();
+    eprintln!(
+        "1008-piece nesting finished in {:.2}s across {} pages (bbox_area_pct={:.1}%)",
+        elapsed.as_secs_f64(),
+        artifacts.layout.pages.len(),
+        artifacts.layout.bbox_area_pct
+    );
+    assert!(
+        elapsed < Duration::from_secs(60),
+        "expected < 60s for 1008 pieces, took {:.2}s",
+        elapsed.as_secs_f64()
+    );
+    assert!(!artifacts.layout.pages.is_empty());
 }

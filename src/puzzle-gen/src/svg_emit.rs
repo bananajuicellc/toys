@@ -3,7 +3,9 @@ use std::fmt::Write as _;
 use kurbo::{BezPath, PathEl, Point, Rect, Shape, Vec2};
 use xmlwriter::{Indent, Options, XmlWriter};
 
-use crate::model::{Config, KerfedGrid, LengthUnit, PagePlan, PaginatedLayout, SplicedPuzzle};
+use crate::model::{
+    Config, KerfedGrid, LengthUnit, PagePlan, PaginatedLayout, Rotation90, SplicedPuzzle,
+};
 use crate::paginate::compute_slot_bounds;
 
 const SVG_NS: &str = "http://www.w3.org/2000/svg";
@@ -210,10 +212,15 @@ fn format_bezpath(path: &BezPath, unit: LengthUnit) -> String {
     d
 }
 
-fn format_closed_polygon(pts: &[Point], offset_mm: Vec2, unit: LengthUnit) -> String {
+fn format_closed_polygon(
+    pts: &[Point],
+    rot: Rotation90,
+    offset_mm: Vec2,
+    unit: LengthUnit,
+) -> String {
     let mut d = String::new();
     for (idx, &p) in pts.iter().enumerate() {
-        let q = p + offset_mm;
+        let q = rot.rotate_point(p) + offset_mm;
         if idx == 0 {
             let _ = write!(d, "M {} {}", fmt_mm(q.x, unit), fmt_mm(q.y, unit));
         } else {
@@ -423,7 +430,7 @@ pub fn emit_stage2(kerfed: &KerfedGrid, config: &Config) -> String {
         w.write_attribute("style", &piece_style);
         w.write_attribute(
             "d",
-            &format_closed_polygon(&p.cut_polygon, Vec2::ZERO, unit),
+            &format_closed_polygon(&p.cut_polygon, Rotation90::Deg0, Vec2::ZERO, unit),
         );
         w.end_element();
         w.end_element();
@@ -480,14 +487,18 @@ pub fn emit_stage3(kerfed: &KerfedGrid, layout: &PaginatedLayout, config: &Confi
             let ty_mm = slot.offset_mm.y;
 
             w.start_element("g");
-            w.write_attribute(
-                "transform",
-                &format!(
-                    "translate({}, {})",
+            let transform = match slot.rotation {
+                Rotation90::Deg0 => {
+                    format!("translate({}, {})", fmt_mm(tx_mm, unit), fmt_mm(ty_mm, unit))
+                }
+                rot => format!(
+                    "translate({}, {}) rotate({})",
                     fmt_mm(tx_mm, unit),
-                    fmt_mm(ty_mm, unit)
+                    fmt_mm(ty_mm, unit),
+                    rot.degrees()
                 ),
-            );
+            };
+            w.write_attribute("transform", &transform);
             w.start_element("path");
             w.write_attribute("id", &format!("piece-r{}-c{}", piece.row, piece.col));
             w.write_attribute(
@@ -496,7 +507,7 @@ pub fn emit_stage3(kerfed: &KerfedGrid, layout: &PaginatedLayout, config: &Confi
             );
             w.write_attribute(
                 "d",
-                &format_closed_polygon(&piece.bleed_polygon, Vec2::ZERO, unit),
+                &format_closed_polygon(&piece.bleed_polygon, Rotation90::Deg0, Vec2::ZERO, unit),
             );
             w.end_element();
             w.end_element();
@@ -556,7 +567,7 @@ pub fn emit_stage4_page(kerfed: &KerfedGrid, page: &PagePlan, config: &Config) -
         w.write_attribute("style", &cut_style);
         w.write_attribute(
             "d",
-            &format_closed_polygon(&piece.cut_polygon, slot.offset_mm, unit),
+            &format_closed_polygon(&piece.cut_polygon, slot.rotation, slot.offset_mm, unit),
         );
         w.end_element();
     }
@@ -723,5 +734,121 @@ mod tests {
             d4.descendants()
                 .any(|n| n.attribute((INKSCAPE_NS_TEST, "label")) == Some("PageNumbers"))
         );
+    }
+
+    #[test]
+    fn rotates_stage3_and_stage4_consistently_for_deg90() {
+        use crate::model::{CoordFrame, KerfedPiece, PageSlot};
+
+        let poly = vec![
+            Point::new(0.0, 0.0),
+            Point::new(25.4, 0.0),
+            Point::new(25.4, 12.7),
+            Point::new(0.0, 12.7),
+        ];
+        let kerfed = KerfedGrid {
+            frame: CoordFrame {
+                doc_unit: LengthUnit::In,
+                viewbox_min_user: (0.0, 0.0),
+                user_to_mm: (25.4, 25.4),
+                doc_to_mm: 25.4,
+            },
+            image_href: PNG_1X1.to_string(),
+            image_bounds_mm: Rect::new(0.0, 0.0, 25.4, 12.7),
+            puzzle_bounds_mm: Rect::new(0.0, 0.0, 25.4, 12.7),
+            image_preserve_aspect_ratio: "none".to_string(),
+            image_rendering: None,
+            rows: 1,
+            cols: 1,
+            matched_tabs: 0,
+            missing_tabs: 0,
+            pieces: vec![KerfedPiece {
+                row: 0,
+                col: 0,
+                id: "p0".to_string(),
+                cut_aabb_mm: Rect::new(0.0, 0.0, 25.4, 12.7),
+                cut_polygon: poly.clone(),
+                bleed_polygon: poly,
+            }],
+        };
+        let cfg = Config {
+            page_width_mm: LengthUnit::In.to_mm(4.0),
+            page_height_mm: LengthUnit::In.to_mm(4.0),
+            page_unit: LengthUnit::Mm,
+            margin_mm: 5.0,
+            ..Config::default()
+        };
+        let slot = PageSlot {
+            piece_index: 0,
+            rotation: Rotation90::Deg90,
+            offset_mm: Vec2::new(30.0, 10.0),
+        };
+        let layout = PaginatedLayout {
+            puzzle_area_mm2: 25.4 * 12.7,
+            total_bbox_area_mm2: 20.0 * 30.0,
+            bbox_area_pct: 186.0,
+            pages: vec![PagePlan {
+                page_number: 1,
+                slots: vec![slot],
+                content_bbox_mm: Rect::new(5.0, 5.0, 35.0, 40.0),
+                bottom_right_anchor_mm: Point::new(35.0, 40.0),
+                corner_strokes_mm: Vec::new(),
+            }],
+        };
+
+        let s3 = emit_stage3(&kerfed, &layout, &cfg);
+        let s4 = emit_stage4_page(&kerfed, &layout.pages[0], &cfg);
+
+        let d3 = roxmltree::Document::parse(&s3).unwrap();
+        let p3 = d3
+            .descendants()
+            .find(|n| n.tag_name().name() == "path" && n.attribute("id") == Some("piece-r0-c0"))
+            .unwrap();
+        let tf3 = p3.parent().unwrap().attribute("transform").unwrap();
+        assert!(tf3.contains("rotate(90)"), "expected rotate(90) in {tf3}");
+
+        let d4 = roxmltree::Document::parse(&s4).unwrap();
+        let p4 = d4
+            .descendants()
+            .find(|n| n.tag_name().name() == "path" && n.attribute("id") == Some("piece-r0-c0"))
+            .unwrap();
+
+        let (mut tx3, mut ty3, mut ang3) = (0.0, 0.0, 0.0);
+        for tok in svgtypes::TransformListParser::from(tf3) {
+            match tok.unwrap() {
+                svgtypes::TransformListToken::Translate { tx, ty } => {
+                    tx3 = LengthUnit::In.to_mm(tx);
+                    ty3 = LengthUnit::In.to_mm(ty);
+                }
+                svgtypes::TransformListToken::Rotate { angle } => ang3 = angle,
+                other => panic!("unexpected transform token: {other:?}"),
+            }
+        }
+        assert!((ang3 - 90.0).abs() < 1e-9);
+        let (sin_r, cos_r) = ang3.to_radians().sin_cos();
+
+        let parse_pts = |d: &str, u: LengthUnit| -> Vec<(f64, f64)> {
+            svgtypes::SimplifyingPathParser::from(d)
+                .filter_map(|seg| match seg.unwrap() {
+                    svgtypes::SimplePathSegment::MoveTo { x, y }
+                    | svgtypes::SimplePathSegment::LineTo { x, y } => {
+                        Some((u.to_mm(x), u.to_mm(y)))
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+
+        let pts3: Vec<(f64, f64)> = parse_pts(p3.attribute("d").unwrap(), LengthUnit::In)
+            .into_iter()
+            .map(|(x, y)| (x * cos_r - y * sin_r + tx3, x * sin_r + y * cos_r + ty3))
+            .collect();
+        let pts4 = parse_pts(p4.attribute("d").unwrap(), LengthUnit::Mm);
+
+        assert_eq!(pts3.len(), pts4.len());
+        for (a, b) in pts3.iter().zip(pts4.iter()) {
+            let err = ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt();
+            assert!(err <= 2.2e-4, "parity error {err} mm > 2.2e-4 mm");
+        }
     }
 }

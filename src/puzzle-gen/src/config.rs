@@ -20,6 +20,7 @@ struct RawConfig {
     print_bleed: Option<String>,
     #[serde(default, deserialize_with = "deserialize_present_nullable_string")]
     score_color: Option<Option<String>>,
+    seed: Option<u64>,
 }
 
 fn deserialize_present_nullable_string<'de, D>(
@@ -163,6 +164,10 @@ impl Config {
                 ));
             }
             cfg.score_color = parse_score_color(&score_color)?;
+        }
+
+        if let Some(seed) = raw.seed {
+            cfg.seed = seed;
         }
 
         Ok(cfg)
@@ -593,6 +598,7 @@ mod tests {
     fn yaml_defaults_and_kerf_multipliers() {
         let empty = Config::from_yaml(Some("# just a comment\n")).unwrap();
         assert_eq!(empty, Config::default());
+        assert_eq!(empty.seed, 0);
 
         let yaml = r##"
 version: 1
@@ -604,6 +610,7 @@ segment_length: "1.5 kerf"
 piece_spacing: "2kerf"
 print_bleed: "1 kerf"
 score_color: "#FF00AA"
+seed: 42
 "##;
         let cfg = Config::from_yaml(Some(yaml)).unwrap();
         assert!((cfg.page_width_mm - 215.9).abs() < 1e-9);
@@ -615,6 +622,10 @@ score_color: "#FF00AA"
         assert!((cfg.piece_spacing_mm - 0.48).abs() < 1e-9);
         assert!((cfg.print_bleed_mm - 0.24).abs() < 1e-9);
         assert_eq!(cfg.score_color, "#ff00aa");
+        assert_eq!(cfg.seed, 42);
+
+        assert!(Config::from_yaml(Some("seed: -1\n")).is_err());
+        assert!(Config::from_yaml(Some("seed: 1.5\n")).is_err());
     }
 
     #[test]

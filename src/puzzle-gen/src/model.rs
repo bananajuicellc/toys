@@ -70,13 +70,14 @@ pub struct Config {
     pub piece_spacing_mm: f64,
     pub print_bleed_mm: f64,
     pub score_color: String,
+    pub seed: u64,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            page_width_mm: LengthUnit::In.to_mm(6.0),
-            page_height_mm: LengthUnit::In.to_mm(6.0),
+            page_width_mm: LengthUnit::In.to_mm(8.5),
+            page_height_mm: LengthUnit::In.to_mm(11.0),
             page_unit: LengthUnit::Mm,
             margin_mm: LengthUnit::In.to_mm(0.25),
             kerf_mm: 0.18,
@@ -84,6 +85,7 @@ impl Default for Config {
             piece_spacing_mm: 0.18,
             print_bleed_mm: 0.18,
             score_color: "#0000ff".to_string(),
+            seed: 0,
         }
     }
 }
@@ -153,6 +155,7 @@ pub struct SplicedPuzzle {
     pub frame: CoordFrame,
     pub image_href: String,
     pub image_bounds_mm: kurbo::Rect,
+    pub puzzle_bounds_mm: kurbo::Rect,
     pub image_preserve_aspect_ratio: String,
     pub image_rendering: Option<String>,
     pub rows: usize,
@@ -179,6 +182,7 @@ pub struct KerfedGrid {
     pub frame: CoordFrame,
     pub image_href: String,
     pub image_bounds_mm: kurbo::Rect,
+    pub puzzle_bounds_mm: kurbo::Rect,
     pub image_preserve_aspect_ratio: String,
     pub image_rendering: Option<String>,
     pub rows: usize,
@@ -186,6 +190,98 @@ pub struct KerfedGrid {
     pub matched_tabs: usize,
     pub missing_tabs: usize,
     pub pieces: Vec<KerfedPiece>,
+}
+
+/// Clockwise right-angle piece rotation in `+y`-down coordinates around `(0, 0)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Rotation90 {
+    Deg0,
+    Deg90,
+    Deg180,
+    Deg270,
+}
+
+impl Rotation90 {
+    pub const ALL: [Rotation90; 4] = [
+        Rotation90::Deg0,
+        Rotation90::Deg90,
+        Rotation90::Deg180,
+        Rotation90::Deg270,
+    ];
+
+    /// Returns the SVG clockwise rotation angle in degrees.
+    pub fn degrees(self) -> u16 {
+        match self {
+            Rotation90::Deg0 => 0,
+            Rotation90::Deg90 => 90,
+            Rotation90::Deg180 => 180,
+            Rotation90::Deg270 => 270,
+        }
+    }
+
+    /// Returns the next clockwise 90-degree orientation.
+    pub fn next_cw(self) -> Self {
+        match self {
+            Rotation90::Deg0 => Rotation90::Deg90,
+            Rotation90::Deg90 => Rotation90::Deg180,
+            Rotation90::Deg180 => Rotation90::Deg270,
+            Rotation90::Deg270 => Rotation90::Deg0,
+        }
+    }
+
+    /// Returns the previous clockwise 90-degree orientation.
+    pub fn prev_cw(self) -> Self {
+        match self {
+            Rotation90::Deg0 => Rotation90::Deg270,
+            Rotation90::Deg90 => Rotation90::Deg0,
+            Rotation90::Deg180 => Rotation90::Deg90,
+            Rotation90::Deg270 => Rotation90::Deg180,
+        }
+    }
+
+    /// Rotates a point clockwise around `(0, 0)` in `+y`-down coordinates.
+    pub fn rotate_point(self, p: kurbo::Point) -> kurbo::Point {
+        match self {
+            Rotation90::Deg0 => p,
+            Rotation90::Deg90 => kurbo::Point::new(-p.y, p.x),
+            Rotation90::Deg180 => kurbo::Point::new(-p.x, -p.y),
+            Rotation90::Deg270 => kurbo::Point::new(p.y, -p.x),
+        }
+    }
+}
+
+/// Default deterministic local-search iteration budget for non-interactive runs.
+pub const DEFAULT_OPTIMIZE_ITERS: usize = 64;
+
+/// Controls irregular polygon nesting budget and PRNG determinism.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PaginateOptions {
+    pub seed: u64,
+    pub max_iters: Option<usize>,
+}
+
+impl PaginateOptions {
+    /// Builds default pagination options using `config.seed` and `DEFAULT_OPTIMIZE_ITERS`.
+    pub fn from_config(config: &Config) -> Self {
+        Self {
+            seed: config.seed,
+            max_iters: Some(DEFAULT_OPTIMIZE_ITERS),
+        }
+    }
+}
+
+/// Progress snapshot emitted during irregular polygon nesting optimization.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NestProgress {
+    pub rows: usize,
+    pub cols: usize,
+    pub iter: usize,
+    pub total_iters: Option<usize>,
+    pub pages: usize,
+    pub total_bbox_area_mm2: f64,
+    pub puzzle_area_mm2: f64,
+    pub bbox_area_pct: f64,
+    pub page_fill_ratios: Vec<f64>,
 }
 
 /// Page corner band anchor for registration ticks and vector page numbers.
@@ -199,26 +295,33 @@ pub enum CornerAnchor {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PageSlot {
     pub piece_index: usize,
-    pub row: usize,
-    pub col: usize,
+    pub rotation: Rotation90,
     pub offset_mm: kurbo::Vec2,
 }
 
-/// Planned print/cut sheet with piece translations and corner registration strokes.
+impl PageSlot {
+    /// Maps a point in piece local coordinates to sheet coordinates via rotation and offset.
+    pub fn transform_point(self, p: kurbo::Point) -> kurbo::Point {
+        self.rotation.rotate_point(p) + self.offset_mm
+    }
+}
+
+/// Planned print/cut sheet with piece placements, compacted bounding box, and corner registration strokes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PagePlan {
     pub page_number: usize,
     pub slots: Vec<PageSlot>,
+    pub content_bbox_mm: kurbo::Rect,
+    pub bottom_right_anchor_mm: kurbo::Point,
     pub corner_strokes_mm: Vec<Vec<kurbo::Point>>,
 }
 
 /// Stage 3 and Stage 4 shared pagination layout in canonical `mm`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PaginatedLayout {
-    pub slot_w_mm: f64,
-    pub slot_h_mm: f64,
-    pub page_cols: usize,
-    pub page_rows: usize,
+    pub puzzle_area_mm2: f64,
+    pub total_bbox_area_mm2: f64,
+    pub bbox_area_pct: f64,
     pub pages: Vec<PagePlan>,
 }
 

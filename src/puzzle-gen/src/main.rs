@@ -1,5 +1,7 @@
+mod tui;
+
 use std::fs;
-use std::io::{ErrorKind, Write};
+use std::io::{ErrorKind, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -43,6 +45,14 @@ struct Cli {
     /// Write completed Stage 1 (and Stage 2 if available) debug SVGs when a downstream stage fails.
     #[arg(long)]
     emit_debug_on_error: bool,
+
+    /// Deterministic PRNG seed overriding `seed` from configuration YAML.
+    #[arg(long)]
+    seed: Option<u64>,
+
+    /// Launch live terminal UI on stderr showing nesting optimization progress.
+    #[arg(long)]
+    interactive: bool,
 }
 
 fn main() -> ExitCode {
@@ -96,10 +106,28 @@ fn run_cli() -> Result<(), String> {
         ),
         None => None,
     };
-    let config = Config::from_yaml(yaml_text.as_deref()).map_err(|e| e.to_string())?;
+    let mut config = Config::from_yaml(yaml_text.as_deref()).map_err(|e| e.to_string())?;
+    if let Some(seed) = cli.seed {
+        config.seed = seed;
+    }
 
     let mut notices = Vec::new();
-    let result = run_pipeline(&svg_xml, &config, !cli.no_strict, &mut notices);
+    let result = if cli.interactive {
+        if std::io::stderr().is_terminal() && std::io::stdin().is_terminal() {
+            tui::run_interactive_pipeline(&svg_xml, &config, !cli.no_strict, &mut notices)
+        } else {
+            notices.push(PipelineNotice {
+                severity: NoticeSeverity::Warning,
+                code: "INTERACTIVE_NON_TTY",
+                message:
+                    "--interactive requested on a non-TTY stream; falling back to headless optimization"
+                        .to_string(),
+            });
+            run_pipeline(&svg_xml, &config, !cli.no_strict, &mut notices)
+        }
+    } else {
+        run_pipeline(&svg_xml, &config, !cli.no_strict, &mut notices)
+    };
     emit_notices(&notices);
 
     let artifacts = match result {
@@ -112,18 +140,21 @@ fn run_cli() -> Result<(), String> {
         }
     };
 
+    let (slot_w_mm, slot_h_mm) = puzzle_gen::paginate::compute_slot_bounds(&artifacts.kerfed);
     println!("grid={}x{}", artifacts.kerfed.rows, artifacts.kerfed.cols);
     println!("matched_tabs={}", artifacts.kerfed.matched_tabs);
     println!("missing_tabs={}", artifacts.kerfed.missing_tabs);
-    println!(
-        "slot_mm={:.4}x{:.4}",
-        artifacts.layout.slot_w_mm, artifacts.layout.slot_h_mm
-    );
+    println!("slot_mm={slot_w_mm:.4}x{slot_h_mm:.4}");
     println!("pages={}", artifacts.layout.pages.len());
     println!(
-        "page_grid={}x{}",
-        artifacts.layout.page_cols, artifacts.layout.page_rows
+        "puzzle_area_mm2={:.4}",
+        artifacts.layout.puzzle_area_mm2
     );
+    println!(
+        "total_bbox_mm2={:.4}",
+        artifacts.layout.total_bbox_area_mm2
+    );
+    println!("bbox_area_pct={:.2}", artifacts.layout.bbox_area_pct);
 
     if cli.dry_run {
         return Ok(());

@@ -360,10 +360,18 @@ pub fn splice_tabs(
         });
     }
 
+    let puzzle_bounds_mm = kurbo::Rect::new(
+        puzzle.x_lines_mm[0],
+        puzzle.y_lines_mm[0],
+        puzzle.x_lines_mm[cols],
+        puzzle.y_lines_mm[rows],
+    );
+
     Ok(SplicedPuzzle {
         frame: puzzle.frame,
         image_href: puzzle.image_href.clone(),
         image_bounds_mm: puzzle.image_bounds_mm,
+        puzzle_bounds_mm,
         image_preserve_aspect_ratio: puzzle.image_preserve_aspect_ratio.clone(),
         image_rendering: puzzle.image_rendering.clone(),
         rows,
