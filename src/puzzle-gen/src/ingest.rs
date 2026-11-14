@@ -71,6 +71,7 @@ pub fn ingest_svg(
         image_href: image_info.href,
         image_bounds_mm: image_info.bounds_mm,
         image_preserve_aspect_ratio: image_info.preserve_aspect_ratio,
+        image_rendering: image_info.image_rendering,
         rows,
         cols,
         x_lines_mm,
@@ -301,6 +302,7 @@ struct ImageInfo {
     href: String,
     bounds_mm: Rect,
     preserve_aspect_ratio: String,
+    image_rendering: Option<String>,
 }
 
 fn extract_image(
@@ -397,13 +399,45 @@ fn extract_image(
         .unwrap_or("none")
         .to_string();
 
+    let image_rendering = extract_image_rendering(node);
+
     let bounds_mm = Rect::new(p00.x, p00.y, p11.x, p11.y);
 
     Ok(ImageInfo {
         href,
         bounds_mm,
         preserve_aspect_ratio,
+        image_rendering,
     })
+}
+
+fn extract_image_rendering(node: Node<'_, '_>) -> Option<String> {
+    let mut cur = Some(node);
+    while let Some(el) = cur {
+        if !el.is_element() {
+            break;
+        }
+        if let Some(style) = el.attribute("style") {
+            for decl in style.split(';').rev() {
+                if let Some((key, val)) = decl.split_once(':')
+                    && key.trim().eq_ignore_ascii_case("image-rendering")
+                {
+                    let trimmed = val.trim();
+                    if !trimmed.is_empty() {
+                        return Some(trimmed.to_string());
+                    }
+                }
+            }
+        }
+        if let Some(attr) = el.attribute("image-rendering") {
+            let trimmed = attr.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+        cur = el.parent();
+    }
+    None
 }
 
 fn is_allowed_data_image_uri(uri: &str) -> bool {

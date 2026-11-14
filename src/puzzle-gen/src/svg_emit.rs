@@ -99,6 +99,7 @@ fn write_shared_defs(
     image_href: &str,
     image_bounds_mm: Rect,
     preserve_aspect_ratio: &str,
+    image_rendering: Option<&str>,
     unit: LengthUnit,
 ) {
     let w_mm = image_bounds_mm.width();
@@ -118,6 +119,9 @@ fn write_shared_defs(
     w.write_attribute("width", &w_str);
     w.write_attribute("height", &h_str);
     w.write_attribute("preserveAspectRatio", preserve_aspect_ratio);
+    if let Some(rendering) = image_rendering {
+        w.write_attribute("style", &format!("image-rendering:{rendering}"));
+    }
     w.write_attribute("xlink:href", image_href);
     w.end_element();
 
@@ -316,6 +320,7 @@ pub fn emit_stage1(spliced: &SplicedPuzzle) -> String {
         &spliced.image_href,
         spliced.image_bounds_mm,
         &spliced.image_preserve_aspect_ratio,
+        spliced.image_rendering.as_deref(),
         unit,
     );
 
@@ -383,6 +388,7 @@ pub fn emit_stage2(kerfed: &KerfedGrid, config: &Config) -> String {
         &kerfed.image_href,
         kerfed.image_bounds_mm,
         &kerfed.image_preserve_aspect_ratio,
+        kerfed.image_rendering.as_deref(),
         unit,
     );
 
@@ -456,6 +462,7 @@ pub fn emit_stage3(kerfed: &KerfedGrid, layout: &PaginatedLayout, config: &Confi
         &kerfed.image_href,
         kerfed.image_bounds_mm,
         &kerfed.image_preserve_aspect_ratio,
+        kerfed.image_rendering.as_deref(),
         unit,
     );
 
@@ -594,7 +601,7 @@ mod tests {
             r#"<svg width="2in" height="2in" viewBox="0 0 2 2" xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" xmlns:xlink="http://www.w3.org/1999/xlink">
   <sodipodi:namedview inkscape:document-units="in"/>
   <g inkscape:groupmode="layer" inkscape:label="Image">
-    <image id="img1" x="0" y="0" width="2" height="2" xlink:href="{PNG_1X1}"/>
+    <image id="img1" x="0" y="0" width="2" height="2" style="image-rendering:optimizeSpeed" xlink:href="{PNG_1X1}"/>
   </g>
   <g inkscape:groupmode="layer" inkscape:label="Pieces">
     <rect id="r00" x="0" y="0" width="1" height="1"/>
@@ -632,6 +639,14 @@ mod tests {
         let d1 = roxmltree::Document::parse(&s1).unwrap();
         assert_eq!(
             d1.descendants()
+                .find(
+                    |n| n.tag_name().name() == "image" && n.attribute("id") == Some("puzzle-image")
+                )
+                .and_then(|n| n.attribute("style")),
+            Some("image-rendering:optimizeSpeed")
+        );
+        assert_eq!(
+            d1.descendants()
                 .find(|n| n.tag_name().name() == "namedview"
                     && n.tag_name().namespace() == Some(SODIPODI_NS_TEST))
                 .and_then(|n| n.attribute((INKSCAPE_NS_TEST, "document-units"))),
@@ -646,6 +661,14 @@ mod tests {
 
         let s2 = emit_stage2(&kerfed, &cfg);
         let d2 = roxmltree::Document::parse(&s2).unwrap();
+        assert_eq!(
+            d2.descendants()
+                .find(
+                    |n| n.tag_name().name() == "image" && n.attribute("id") == Some("puzzle-image")
+                )
+                .and_then(|n| n.attribute("style")),
+            Some("image-rendering:optimizeSpeed")
+        );
         assert!(
             d2.descendants()
                 .any(|n| n.attribute((INKSCAPE_NS_TEST, "label")) == Some("GridLabels"))
@@ -653,6 +676,14 @@ mod tests {
 
         let s3 = emit_stage3(&kerfed, &layout, &cfg);
         let d3 = roxmltree::Document::parse(&s3).unwrap();
+        assert_eq!(
+            d3.descendants()
+                .find(
+                    |n| n.tag_name().name() == "image" && n.attribute("id") == Some("puzzle-image")
+                )
+                .and_then(|n| n.attribute("style")),
+            Some("image-rendering:optimizeSpeed")
+        );
         let pages: Vec<_> = d3
             .descendants()
             .filter(|n| n.tag_name().name() == "page")

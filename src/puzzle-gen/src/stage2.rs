@@ -43,6 +43,7 @@ pub fn heal_and_offset(
         image_href: spliced.image_href.clone(),
         image_bounds_mm: spliced.image_bounds_mm,
         image_preserve_aspect_ratio: spliced.image_preserve_aspect_ratio.clone(),
+        image_rendering: spliced.image_rendering.clone(),
         rows: spliced.rows,
         cols: spliced.cols,
         matched_tabs: spliced.matched_tabs,

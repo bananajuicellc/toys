@@ -435,6 +435,7 @@ mod tests {
             image_href: String::new(),
             image_bounds_mm: Rect::ZERO,
             image_preserve_aspect_ratio: "none".to_string(),
+            image_rendering: None,
             rows: 1,
             cols: 1,
             matched_tabs: 0,

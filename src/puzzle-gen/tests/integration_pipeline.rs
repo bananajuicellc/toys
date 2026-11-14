@@ -144,6 +144,10 @@ fn rainy_day_example_strict_fails_and_no_strict_heals_all_25_pieces() {
     assert_eq!(artifacts.kerfed.cols, 5);
     assert_eq!(artifacts.kerfed.matched_tabs, 39);
     assert_eq!(artifacts.kerfed.missing_tabs, 1);
+    assert_eq!(
+        artifacts.spliced.image_rendering.as_deref(),
+        Some("optimizeSpeed")
+    );
     assert_eq!(artifacts.kerfed.pieces.len(), 25);
     assert_eq!(
         notices
@@ -166,7 +170,15 @@ fn rainy_day_example_strict_fails_and_no_strict_heals_all_25_pieces() {
     let s1 = svg_emit::emit_stage1(&artifacts.spliced);
     let s2 = svg_emit::emit_stage2(&artifacts.kerfed, &cfg);
     let s3 = svg_emit::emit_stage3(&artifacts.kerfed, &artifacts.layout, &cfg);
-    roxmltree::Document::parse(&s1).unwrap();
+    let d1 = roxmltree::Document::parse(&s1).unwrap();
+    let img1 = d1
+        .descendants()
+        .find(|n| n.tag_name().name() == "image" && n.attribute("id") == Some("puzzle-image"))
+        .unwrap();
+    assert_eq!(
+        img1.attribute("style"),
+        Some("image-rendering:optimizeSpeed")
+    );
     roxmltree::Document::parse(&s2).unwrap();
     let d3 = roxmltree::Document::parse(&s3).unwrap();
     let page_count = d3

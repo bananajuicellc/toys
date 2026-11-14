@@ -365,6 +365,7 @@ pub fn splice_tabs(
         image_href: puzzle.image_href.clone(),
         image_bounds_mm: puzzle.image_bounds_mm,
         image_preserve_aspect_ratio: puzzle.image_preserve_aspect_ratio.clone(),
+        image_rendering: puzzle.image_rendering.clone(),
         rows,
         cols,
         matched_tabs,
