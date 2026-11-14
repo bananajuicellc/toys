@@ -12,6 +12,8 @@ use crate::model::{
 };
 
 const DEDUP_TOL_MM: f64 = 0.001;
+const MAX_MICRO_LOOP_AREA_MM2: f64 = 1.0;
+const MAX_MICRO_LOOP_AREA_FRAC: f64 = 0.05;
 
 /// Flattens Stage 1 contours, heals cross-edge overshoot via `FillRule::Positive`, and computes cut/bleed polygons.
 pub fn heal_and_offset(
@@ -280,8 +282,8 @@ fn heal_ring_positive(ring: &[Point], sp: &SplicedPiece) -> Result<Vec<Point>, P
     let empty: Vec<[f64; 2]> = Vec::new();
     let shapes = subj.overlay(&empty, OverlayRule::Subject, FillRule::Positive);
 
-    if shapes.len() != 1 || shapes[0].len() != 1 {
-        return Err(PipelineError::new(
+    let healing_error = || {
+        PipelineError::new(
             "stage2",
             format!(
                 "self-union healing failed on piece ({}, {}) id=\"{}\": expected 1 simple ring, got {} shapes / {} contours",
@@ -291,10 +293,42 @@ fn heal_ring_positive(ring: &[Point], sp: &SplicedPiece) -> Result<Vec<Point>, P
                 shapes.len(),
                 shapes.first().map_or(0, Vec::len)
             ),
-        ));
+        )
+    };
+
+    let Some((main_idx, main_outer)) = shapes
+        .iter()
+        .enumerate()
+        .filter_map(|(s_idx, shape)| {
+            let outer = shape.first()?;
+            let outer_ring = ring_from_io(outer);
+            let area = signed_area(&outer_ring).abs();
+            Some((s_idx, outer_ring, area))
+        })
+        .max_by(|a, b| a.2.total_cmp(&b.2))
+        .map(|(s_idx, outer_ring, _)| (s_idx, outer_ring))
+    else {
+        return Err(healing_error());
+    };
+
+    let main_area = signed_area(&main_outer).abs();
+    let max_artifact_area = MAX_MICRO_LOOP_AREA_MM2.min(main_area * MAX_MICRO_LOOP_AREA_FRAC);
+
+    for (s_idx, shape) in shapes.iter().enumerate() {
+        if shape.is_empty() {
+            return Err(healing_error());
+        }
+        for (c_idx, contour) in shape.iter().enumerate() {
+            if s_idx == main_idx && c_idx == 0 {
+                continue;
+            }
+            if contour.is_empty() || signed_area(&ring_from_io(contour)).abs() > max_artifact_area {
+                return Err(healing_error());
+            }
+        }
     }
 
-    let mut healed = ring_from_io(&shapes[0][0]);
+    let mut healed = main_outer;
     while healed.len() >= 2 && healed.last().unwrap().distance(healed[0]) < DEDUP_TOL_MM {
         healed.pop();
     }
@@ -605,6 +639,64 @@ mod tests {
                     a.distance(b)
                 );
             }
+        }
+    }
+
+    #[test]
+    fn heals_shared_edge_micro_loop_on_both_mating_pieces() {
+        // Reproduces path1's micro-segment on a 1x2 grid where x_lines[1] = 17.911593 mm is slightly
+        // right of the micro-segment's interior endpoint at x = 17.889311 mm, creating a -1 micro-hole
+        // on piece (0, 0) and a +1 detached micro-island on piece (0, 1) under FillRule::Positive.
+        let svg = format!(
+            r#"<svg width="35.726572mm" height="19.471853mm" viewBox="0 0 35.726572 19.471853" xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <sodipodi:namedview inkscape:document-units="mm"/>
+  <g inkscape:groupmode="layer" inkscape:label="Image">
+    <image id="img1" x="0" y="0" width="35.726572" height="19.471853" xlink:href="{PNG_1X1}"/>
+  </g>
+  <g inkscape:groupmode="layer" inkscape:label="Pieces">
+    <rect id="r00" x="0.112719" y="0.056014" width="17.798874" height="19.415839"/>
+    <rect id="r01" x="17.911593" y="0.056014" width="17.814979" height="19.415839"/>
+  </g>
+  <g inkscape:groupmode="layer" inkscape:label="Tabs">
+    <path id="path1" d="M 17.889311 7.824013 C 17.889311 7.807997 18.485862 7.824207 17.889311 7.749296 C 18.652481 7.857937 19.379209 7.710687 20.062211 7.338296 C 20.766370 6.954361 20.725976 5.845122 21.569794 5.582220 C 24.792341 4.578186 24.902877 12.310932 22.769009 13.241707 C 21.373140 13.850573 18.787211 11.117469 17.889305 11.037271"/>
+  </g>
+</svg>"#
+        );
+        let mut notices = Vec::new();
+        let ingested = ingest_svg(&svg, &mut notices).unwrap();
+        let spliced = splice_tabs(&ingested, true, &mut notices).unwrap();
+        let cfg = Config::default();
+
+        // Verify the test inputs genuinely trigger both raw FillRule::Positive artifact topologies.
+        let empty: Vec<[f64; 2]> = Vec::new();
+        let flat0 = flatten_piece_contour(
+            &spliced.pieces[0].path_mm,
+            cfg.segment_length_mm,
+            &spliced.pieces[0],
+        )
+        .unwrap();
+        let subj0: Vec<[f64; 2]> = flat0.iter().map(|p| [p.x, p.y]).collect();
+        let raw_shapes0 = subj0.overlay(&empty, OverlayRule::Subject, FillRule::Positive);
+        assert_eq!(raw_shapes0.len(), 1);
+        assert_eq!(raw_shapes0[0].len(), 2);
+
+        let flat1 = flatten_piece_contour(
+            &spliced.pieces[1].path_mm,
+            cfg.segment_length_mm,
+            &spliced.pieces[1],
+        )
+        .unwrap();
+        let subj1: Vec<[f64; 2]> = flat1.iter().map(|p| [p.x, p.y]).collect();
+        let raw_shapes1 = subj1.overlay(&empty, OverlayRule::Subject, FillRule::Positive);
+        assert_eq!(raw_shapes1.len(), 2);
+        assert_eq!(raw_shapes1[0].len(), 1);
+        assert_eq!(raw_shapes1[1].len(), 1);
+
+        let kerfed = heal_and_offset(&spliced, &cfg, &mut notices).unwrap();
+        assert_eq!(kerfed.pieces.len(), 2);
+        for p in &kerfed.pieces {
+            assert!(signed_area(&p.cut_polygon) > 0.0);
+            assert!(signed_area(&p.bleed_polygon) > signed_area(&p.cut_polygon));
         }
     }
 }
