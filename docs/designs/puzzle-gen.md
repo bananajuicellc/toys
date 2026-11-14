@@ -8,7 +8,7 @@
 
 ## Overview
 
-`puzzle-gen` is a local Rust CLI and geometric library in `src/puzzle-gen` inside the repository's Cargo workspace. It prepares custom jigsaw puzzle artwork drawn in Inkscape for physical fabrication: printing artwork onto adhesive label paper via Inkscape multi-page PDF export, adhering the sheet to backing board, and cutting individual pieces on a laser cutter.
+`puzzle-gen` is a local Rust CLI and geometric library in [`src/puzzle-gen`](../../src/puzzle-gen) inside the repository's Cargo workspace. It prepares custom jigsaw puzzle artwork drawn in Inkscape for physical fabrication: printing artwork onto adhesive label paper via Inkscape multi-page PDF export, adhering the sheet to backing board, and cutting individual pieces on a laser cutter.
 
 Starting from an unjoined Stage 0 Inkscape SVG containing the required `Image`, `Pieces`, and `Tabs` layers—embedded raster artwork (`Image`), a rectilinear grid of `<rect>` elements (`Pieces`), and open `<path>` tab curves along internal edges (`Tabs`)—plus an optional YAML configuration file, `puzzle-gen` runs an in-memory geometric pipeline in canonical millimeters (`mm`) and writes four sequential SVG outputs for inspection, printing, and laser cutting:
 
@@ -74,7 +74,7 @@ None.
 *   **Given:** A user supplies a Stage 0 SVG where one internal grid edge has no tab `<path>`, or where even one piece slot (`slot_w x slot_h`) plus margins and corner bands exceeds `page_size` (`page_cols * page_rows < 1`).
 *   **When:** The user runs `puzzle-gen input.svg` (or `puzzle-gen input.svg --no-strict`).
 *   **Then:**
-    *   In default strict mode, a missing internal tab causes `puzzle-gen` to exit non-zero before writing outputs and print an error identifying the grid edge `(row1, col1)-(row2, col2)`. When `--no-strict` is passed, `puzzle-gen` downgrades missing internal tabs to warnings, keeps those shared edges straight, and completes all four stages.
+    *   In default strict mode, a missing internal tab causes `puzzle-gen` to exit non-zero before writing outputs and print an error identifying the grid edge `((row1, col1), (row2, col2))`. When `--no-strict` is passed, `puzzle-gen` downgrades missing internal tabs to warnings, keeps those shared edges straight, and completes all four stages.
     *   For unattached non-stray paths, corner-ambiguous or multi-edge tabs, duplicate tabs on one edge, or insufficient page capacity (`page_cols * page_rows < 1`), `puzzle-gen` exits non-zero before writing outputs and prints an error naming the offending SVG element `id` or required minimum `page_size`.
 
 --------------------------------------------------------------------------------
@@ -83,7 +83,7 @@ None.
 
 ### Architecture Overview
 
-`puzzle-gen` separates an I/O-free geometric library (`src/puzzle-gen/src/lib.rs`) from a CLI and filesystem wrapper (`src/puzzle-gen/src/main.rs`). All four stages execute sequentially in memory against immutable domain structs expressed in canonical physical millimeters (`mm`). Downstream stages never re-parse SVG XML emitted by earlier stages; the library returns typed pipeline state (`PipelineArtifacts`), and `main.rs` serializes only the requested output SVGs lazily one stage at a time so `--dry-run` avoids XML/base64 formatting work and multi-megabyte raster payloads are never duplicated simultaneously in memory.
+`puzzle-gen` separates an I/O-free geometric library ([`src/puzzle-gen/src/lib.rs`](../../src/puzzle-gen/src/lib.rs)) from a CLI and filesystem wrapper ([`src/puzzle-gen/src/main.rs`](../../src/puzzle-gen/src/main.rs)). All four stages execute sequentially in memory against immutable domain structs expressed in canonical physical millimeters (`mm`). Downstream stages never re-parse SVG XML emitted by earlier stages; the library returns typed pipeline state (`PipelineArtifacts`), and `main.rs` serializes only the requested output SVGs lazily one stage at a time so `--dry-run` avoids XML/base64 formatting work and multi-megabyte raster payloads are never duplicated simultaneously in memory.
 
 ```text
 Stage 0 Inkscape SVG ──┐
@@ -107,7 +107,7 @@ Optional YAML Config ─▶ [ Config (serde-saphyr) & CoordFrame (mm) ]
                        (Corner bands, margin-bounded slots)      └─▶ <prefix>-stage4-page<N>.svg (page_unit, Cut + PageNumbers)
 ```
 
-`src/puzzle-gen/Cargo.toml` composes pure-Rust crates:
+[`src/puzzle-gen/Cargo.toml`](../../src/puzzle-gen/Cargo.toml) composes pure-Rust crates:
 *   **XML & SVG parsing/writing:** `roxmltree`, `svgtypes`, and `xmlwriter` (preserving Inkscape namespaces, layers, `<sodipodi:namedview>`, and `<inkscape:page>` elements).
 *   **CLI & YAML configuration:** `clap` (with `derive` feature), `serde` (`derive`), and `serde-saphyr` (directly deserializing typed config with built-in duplicate-key rejection, unknown-field denial via `#[serde(deny_unknown_fields)]`, and parser resource budgets).
 *   **Curve geometry & polygon booleans/offsetting:** `kurbo` (exact curve representations, quadratic elevation, curve reversal, and bounded flattening) and `i_overlay` (floating-point `FillRule::Positive` self-union healing and `LineJoin::Round` outward buffering).
@@ -173,7 +173,7 @@ All geometric types share canonical `mm` coordinates in memory; projection to `d
 | `IngestedPuzzle` | Stage 0 Output | Holds `frame`, validated `data:image/` URI `image_href`, axis-aligned `image_bounds_mm`, `image_preserve_aspect_ratio`, optional `image_rendering` scaling mode, contiguous `(rows, cols)` `GridCell` bounds (`mm`), and normalized `TabCandidate` curves. |
 | `SplicedPuzzle` | Stage 1 Output | Holds `frame`, image metadata, `(rows, cols)`, matched/missing edge counts, and closed clockwise `SplicedPiece` contours (`kurbo::BezPath` in `mm`). |
 | `KerfedGrid` | Stage 2 Output | Holds `frame`, image metadata, `(rows, cols)`, and per-piece `KerfedPiece` contours (`cut_polygon`, `bleed_polygon`, each a positive-area ring in `mm`). |
-| `PaginatedLayout` | Stage 3–4 Layout | Shared symmetric cut-centered `(slot_w_mm, slot_h_mm)`, corner band bounds, `(page_cols, page_rows)` capacity (`>= 1 x 1`), and per-page `PagePlan` slots + corner mark polylines (`mm`). |
+| `PaginatedLayout` | Stage 3–4 Layout | Shared symmetric cut-centered `(slot_w_mm, slot_h_mm)`, `(page_cols, page_rows)` capacity (`>= 1 x 1`), and per-page `PagePlan` slots + corner mark polylines (`mm`). |
 | `PipelineArtifacts` | Pipeline Output | Bundles `spliced: SplicedPuzzle`, `kerfed: KerfedGrid`, `layout: PaginatedLayout`, and layout summary metrics without pre-rendering XML strings. |
 
 ### Stage-by-Stage Geometric Pipeline
@@ -190,10 +190,10 @@ All geometric types share canonical `mm` coordinates in memory; projection to `d
 
 1.  **Canonical Internal Edges & Bounded Pair Matching:** Enumerate all internal grid edges (`(rows - 1) * cols` horizontal edges oriented `L→R` from `x_lines[c]` to `x_lines[c + 1]`; `rows * (cols - 1)` vertical edges oriented `T→B` from `y_lines[r]` to `y_lines[r + 1]`). Match each `TabCandidate` jointly by its `(start, end)` endpoint pair against every internal and outer-border edge:
     *   Compute perpendicular distance `perp_dist` and longitudinal projection `t` along `[0.0, edge_len]` for both endpoints.
-    *   Accept a candidate edge when both endpoints have `perp_dist <= 2.0 mm`, `t` inside `[-0.25 mm, edge_len + 0.25 mm]` (or `[-2.0 mm, edge_len + 2.0 mm]` when disambiguated on a single internal edge), and clamped span `|clamp(t_end) - clamp(t_start)| >= 1.0 mm`.
+    *   Accept a candidate edge when both endpoints have `perp_dist <= 2.0 mm`, `t` inside `[-2.0 mm, edge_len + 2.0 mm]` when disambiguated on a single internal edge (with endpoints adjacent to another collinear internal edge restricted to `[-0.25 mm, edge_len + 0.25 mm]`), and clamped span `|clamp(t_end) - clamp(t_start)| >= 1.0 mm`.
     *   Reject tabs matching `> 1` grid edge (corner or narrow-cell ambiguity), tabs matching an outer border, unmatched tabs, or duplicate tabs on one internal edge, naming element `id` and coordinates.
     *   Project matched endpoints orthogonally onto `[0.0, edge_len]` (`t = clamp(t, 0.0, edge_len)`), translate adjacent cubic control handles by the same delta as their snapped endpoint to preserve tangency, and reverse the normalized curve when `t_end < t_start` so `t_start < t_end` in canonical edge order.
-    *   Under strict mode (default), fail naming `(r1, c1)-(r2, c2)` if any internal edge has no tab; under `--no-strict`, emit a `Warning` notice and keep that edge straight.
+    *   Under strict mode (default), fail naming `((r1, c1), (r2, c2))` if any internal edge has no tab; under `--no-strict`, emit a `Warning` notice and keep that edge straight.
 2.  **Clockwise Contour Assembly:** For every `(row, col)` cell, build a closed clockwise `kurbo::BezPath` across its four edges (`top` L→R, `right` T→B, `bottom` R→L, `left` B→T). Canonical internal tabs splice forward (`t = 0.0 -> edge_len`) on **`top`** and **`right`** cell edges, and in reverse (`t = edge_len -> 0.0`) on **`bottom`** and **`left`** cell edges. When an entry or exit lead length is `<= 1e-4 mm`, elide the `LineTo` segment and snap the tab's start or end coordinate directly onto `slot_start` / `slot_end`.
 3.  **Stage 1 SVG Projection (`<prefix>-stage1.svg`):**
     *   Project coordinates into normalized `doc_unit`, emit `<sodipodi:namedview inkscape:document-units="...">`, and expand the root `<svg>` `width`, `height`, and `viewBox` by a fixed `GridLabels` header margin (`8.0 mm`) around the piece bounds so top/left labels and outward tabs are never clipped.
@@ -311,7 +311,7 @@ All geometric types share canonical `mm` coordinates in memory; projection to `d
 
 ## Additional Resources
 
-*   [rainy-day-puzzle-4x4-25piece-step0-piece-shape.svg](../../src/puzzle-gen/examples/rainy-day-puzzle-4x4-25piece-step0-piece-shape.svg): Inkscape Stage 0 reference file (`4 in x 4 in` grid, 25 `<rect>` pieces, 39 open tab `<path>` elements numbered `path1`–`path40` with `path19` absent from XML, leaving internal edge `((2, 0), (3, 0))` along `y = 2.4in, x in [0, 0.8in]` without a tab, plus an embedded PNG on `Image`).
+*   [rainy-day-puzzle-4x4-25piece-step0-piece-shape.svg](../../src/puzzle-gen/examples/rainy-day-puzzle-4x4-25piece-step0-piece-shape.svg): Inkscape Stage 0 reference file (`4 in x 4 in` grid, 25 `<rect>` pieces, 39 open tab `<path>` elements numbered `path1`–`path40` with `path19` absent from XML, leaving internal edge `((2, 0), (3, 0))` along `y = 2.4000in, x in [0.0000, 0.8000]in` without a tab, plus an embedded PNG on `Image`).
 *   [rainy-day-puzzle-4x4-25piece-no-kerf-manual-attempt-at-joining-paths.svg](../../src/puzzle-gen/examples/rainy-day-puzzle-4x4-25piece-no-kerf-manual-attempt-at-joining-paths.svg): Partial proof-of-concept showing `6 in x 6 in` `<inkscape:page>` layout, a pattern-filled piece (`rect1`, alongside unsplit background `rect17` in `Layer 1`), and incomplete manual path joins across the remaining `fill: none` pieces.
 
 ## Future Improvements
@@ -330,7 +330,7 @@ Files are organized into three incremental phases so `cargo check` and `cargo te
 
 #### Phase 1: Crate Manifest, Domain Model, Configuration & Library Root
 
-##### 1. `src/puzzle-gen/Cargo.toml` (Modify)
+##### 1. [`src/puzzle-gen/Cargo.toml`](../../src/puzzle-gen/Cargo.toml) (Modify)
 *   **Type / Scope:** Crate Manifest (Cargo Configuration)
 *   **Proposed Changes:**
     *   Add dependencies:
@@ -344,12 +344,12 @@ Files are organized into three incremental phases so `cargo check` and `cargo te
         *   `i_overlay = "9"`
         *   `tempfile = "3.10"` (used in `[dependencies]` for atomic `NamedTempFile` writes as well as integration tests).
 
-##### 2. `Cargo.lock` (Modify)
+##### 2. [`Cargo.lock`](../../Cargo.lock) (Modify)
 *   **Type / Scope:** Workspace Lockfile
 *   **Proposed Changes:**
     *   Update root `Cargo.lock` when resolving `src/puzzle-gen/Cargo.toml` dependencies.
 
-##### 3. `src/puzzle-gen/src/model.rs` (Create)
+##### 3. [`src/puzzle-gen/src/model.rs`](../../src/puzzle-gen/src/model.rs) (Create)
 *   **Type / Scope:** Rust Domain Model & Error Types
 *   **Proposed Changes:**
     *   Define `LengthUnit { Mm, Cm, In, Px }` with `to_mm(self, val: f64) -> f64`, `from_mm(self, mm: f64) -> f64` (`25.4 / 96.0` mm/px), `as_str(self) -> &'static str`, and `decimal_places(self) -> usize` (`6` for `In`/`Cm`, `4` for `Mm`/`Px`).
@@ -368,9 +368,9 @@ Files are organized into three incremental phases so `cargo check` and `cargo te
         *   `CornerAnchor { TopLeft, BottomRight }`, `PageSlot { pub piece_index: usize, pub row: usize, pub col: usize, pub offset_mm: kurbo::Vec2 }`, `PagePlan { pub page_number: usize, pub slots: Vec<PageSlot>, pub corner_strokes_mm: Vec<Vec<kurbo::Point>> }`, `PaginatedLayout { pub slot_w_mm: f64, pub slot_h_mm: f64, pub page_cols: usize, pub page_rows: usize, pub pages: Vec<PagePlan> }`
         *   `PipelineArtifacts { pub spliced: SplicedPuzzle, pub kerfed: KerfedGrid, pub layout: PaginatedLayout }`
         *   `NoticeSeverity { Info, Warning }`, `PipelineNotice { pub severity: NoticeSeverity, pub code: &'static str, pub message: String }`
-        *   `PipelineError { pub stage: &'static str, pub message: String, pub debug_spliced: Option<SplicedPuzzle>, pub debug_kerfed: Option<KerfedGrid> }` implementing `Display` and `std::error::Error`.
+        *   `PipelineError { pub stage: &'static str, pub message: String, pub debug_spliced: Option<Box<SplicedPuzzle>>, pub debug_kerfed: Option<Box<KerfedGrid>> }` with `PipelineError::new`, `with_debug_spliced`, and `with_debug_kerfed` builders, implementing `Display` and `std::error::Error`.
 
-##### 4. `src/puzzle-gen/src/config.rs` (Create)
+##### 4. [`src/puzzle-gen/src/config.rs`](../../src/puzzle-gen/src/config.rs) (Create)
 *   **Type / Scope:** Configuration (`serde-saphyr`) & `CoordFrame` Module
 *   **Proposed Changes:**
     *   Define `#[derive(Debug, Default, Deserialize)] #[serde(deny_unknown_fields, default)] struct RawConfig` with `version: Option<i64>`, `page_size: Option<String>`, `page_unit: Option<String>`, `margin: Option<String>`, `kerf: Option<String>`, `segment_length: Option<String>`, `piece_spacing: Option<String>`, `print_bleed: Option<String>`, and `score_color: Option<Option<String>>` using `#[serde(deserialize_with = "deserialize_present_nullable_string")]` so explicit YAML `null` (`Some(None)`) is distinguished from an omitted key (`None`).
@@ -386,14 +386,14 @@ Files are organized into three incremental phases so `cargo check` and `cargo te
         *   Reject missing, `%`, or `<= 0.0` `<svg>` `width`, `height`, or `viewBox` dimensions; parse `viewBox` (defaulting to `(0.0, 0.0)` and CSS `px` dimensions); compute `user_to_mm` and `doc_to_mm`; reject aspect mismatch `> 1e-4`.
     *   Add Phase 1 unit tests (`#[cfg(test)]`) covering length grammar (case-insensitivity, whitespace, scientific notation/`NaN` rejection), `kerf` multipliers, `kerf: "0mm"` + `"1 kerf"` `segment_length`, `segment_length < 0.02 mm` rejection, duplicate/unknown/comment-stripped YAML errors, and `CoordFrame` unit resolution & aspect checks.
 
-##### 5. `src/puzzle-gen/src/lib.rs` (Create)
+##### 5. [`src/puzzle-gen/src/lib.rs`](../../src/puzzle-gen/src/lib.rs) (Create)
 *   **Type / Scope:** Rust Library Root (Phase 1 Incremental Exports)
 *   **Proposed Changes:**
     *   Export `pub mod config; pub mod model;` so `cargo check` and `cargo test -p puzzle-gen --lib` compile and execute Phase 1 tests cleanly.
 
 #### Phase 2: Stage 0–2 Ingestion, Bounded Early Snapping & Buffering
 
-##### 6. `src/puzzle-gen/src/ingest.rs` (Create)
+##### 6. [`src/puzzle-gen/src/ingest.rs`](../../src/puzzle-gen/src/ingest.rs) (Create)
 *   **Type / Scope:** Rust Stage 0 SVG Ingestion Module
 *   **Proposed Changes:**
     *   Implement `ingest_svg(svg_xml: &str, notices: &mut Vec<PipelineNotice>) -> Result<IngestedPuzzle, PipelineError>` using `roxmltree` and `svgtypes`:
@@ -402,9 +402,9 @@ Files are organized into three incremental phases so `cargo check` and `cargo te
         *   Validate the single `<image>` (`href` or `xlink:href`, requiring `data:image/(png|jpeg|webp|gif);base64,` prefix), retain `preserveAspectRatio` (default `"none"` when omitted) and any `image-rendering` scaling mode (`style="image-rendering:..."` or the `image-rendering` attribute on `<image>` or an ancestor element), reject rotated/skewed/negatively-scaled `<image>` transforms citing `id`, and emit a `Warning` notice if `image_bounds_mm` does not cover the full `Pieces` grid bounds.
         *   Extract `<rect>` elements from `Pieces` (supporting `LengthUnit` attributes, defaulting `x`/`y` to `0.0`), reject rounded corners (`rx > 1e-4 mm || ry > 1e-4 mm`), verify orthogonality in canonical `mm` on transformed axis edge vectors `v_x, v_y` (`|v_x.y| / ||v_x|| <= 1e-4 && |v_y.x| / ||v_y|| <= 1e-4`), and compute `bounds_mm` via corner `min`/`max` (supporting negative scales uniformly).
         *   Cluster `<rect>` edge coordinates using bounded-diameter `<= 1.0 mm` clustering (sort unique coordinates, open a new cluster whenever `val - cluster_min > 1.0 mm`, replace cluster coordinates with their arithmetic mean). Sort into `(row, col)`, confirm contiguous `rows x cols` coverage (`rows >= 1 && cols >= 1 && cells.len() == rows * cols`), and verify every cell occupies exactly one unique `[x_lines[col], x_lines[col + 1]] x [y_lines[row], y_lines[row + 1]]` slot.
-        *   Parse `Tabs` `<path>` `d` strings via `svgtypes::SimplifyingPathParser` (which handles `M`/`m`, `L`/`l`, `H`/`h`, `V`/`v`, `C`/`c`, `S`/`s`, `Q`/`q`, `T`/`t`, `A`/`a`, `Z`/`z` and lowers elliptical arcs directly into `CurveTo` cubics). Transform coordinates to `mm`, elevate `SimplePathSegment::Quadratic` via **`kurbo::QuadBez::to_cubic()`**, and filter sub-`0.05 mm` stray paths (`aabb_diag < 0.05 mm && arc_len < 0.05 mm`, emitting an `Info` notice with `id`) *before* rejecting retained closed (`Z`) or multi-subpath (`> 1` `M`) elements.
+        *   Parse `Tabs` `<path>` `d` strings via `svgtypes::SimplifyingPathParser` (which handles `M`/`m`, `L`/`l`, `H`/`h`, `V`/`v`, `C`/`c`, `S`/`s`, `Q`/`q`, `T`/`t`, `A`/`a`, `Z`/`z` and lowers elliptical arcs directly into `CurveTo` cubics). Transform coordinates to `mm`, elevate `SimplePathSegment::Quadratic` via **`kurbo::QuadBez::raise()`**, and filter sub-`0.05 mm` stray paths (`aabb_diag < 0.05 mm && arc_len < 0.05 mm`, emitting an `Info` notice with `id`) *before* rejecting retained closed (`Z`) or multi-subpath (`> 1` `M`) elements.
 
-##### 7. `src/puzzle-gen/src/stage1.rs` (Create)
+##### 7. [`src/puzzle-gen/src/stage1.rs`](../../src/puzzle-gen/src/stage1.rs) (Create)
 *   **Type / Scope:** Rust Stage 1 Edge Matching & Splicing Module
 *   **Proposed Changes:**
     *   Implement `splice_tabs(puzzle: &IngestedPuzzle, strict: bool, notices: &mut Vec<PipelineNotice>) -> Result<SplicedPuzzle, PipelineError>`:
@@ -415,25 +415,25 @@ Files are organized into three incremental phases so `cargo check` and `cargo te
         *   Fail when `strict == true` if any internal edge has no tab; emit a `Warning` notice and leave a straight line when `strict == false`.
         *   Assemble clockwise `kurbo::BezPath` contours (`top` L→R, `right` T→B, `bottom` R→L, `left` B→T): emit `top` and `right` internal edges **forward** (`t = 0.0 -> edge_len`) and `bottom` and `left` internal edges **reversed** (`t = edge_len -> 0.0`). On each slotted tab edge (`slot_start -> slot_end` with directed tab `(tab_entry, tab_exit)`), emit `LineTo(tab_entry)` if entry lead length `> 1e-4 mm` (else snap the first tab segment start directly to `slot_start`), emit the normalized tab segments (`LineTo` and `CurveTo`), and emit `LineTo(slot_end)` if exit lead length `> 1e-4 mm` (else snap the last tab segment end directly to `slot_end`).
 
-##### 8. `src/puzzle-gen/src/stage2.rs` (Create)
+##### 8. [`src/puzzle-gen/src/stage2.rs`](../../src/puzzle-gen/src/stage2.rs) (Create)
 *   **Type / Scope:** Rust Stage 2 Flattening, Healing & Polygon Offsetting Module
 *   **Proposed Changes:**
     *   Implement `heal_and_offset(spliced: &SplicedPuzzle, config: &Config, notices: &mut Vec<PipelineNotice>) -> Result<KerfedGrid, PipelineError>`:
         *   Preserve straight `LineTo` segments as two-point lines; flatten curved segments using `kurbo::flatten` with tolerance `(config.segment_length_mm * 0.1).min(0.05)` and uniformly subdivide any curved chord exceeding `config.segment_length_mm`. Deduplicate consecutive points closer than `0.001 mm` and normalize closed rings to positive signed `(x, y)` area (`+1` winding in SVG `+y`-down coordinates).
         *   Run `i_overlay` floating-point self-union (`SingleFloatOverlay::overlay` with `OverlayRule::Subject`, `FillRule::Positive`) on each ring before measuring `unoffset_area`, discarding `-1` exterior cross-edge overshoot ears while verifying `shapes.len() == 1 && shapes[0].len() == 1`.
         *   Short-circuit `0.0` offsets (`kerf_mm == 0.0` for `cut_polygon`; `print_bleed_mm == 0.0` for `bleed_polygon`) directly to a clone of the healed unoffset ring.
-        *   For positive offsets, buffer outward in `mm` via `i_overlay` floating-point `OutlineOffset::outline(&OutlineStyle::new(offset_mm).line_join(LineJoin::Round(0.1)))`, then run closed-ring Ramer-Douglas-Peucker (`RDP`) simplification (splitting at the farthest antipodal vertex pair before running standard `RDP` with tolerance `min(0.005, config.segment_length_mm * 0.05) mm`).
+        *   For positive offsets, buffer outward in `mm` via `i_overlay` floating-point `OutlineOffset::outline_custom_as::<i64>(&OutlineStyle::new(offset_mm).line_join(LineJoin::Round(0.1)), outline_options_i64())` using `OverlayOptions<f64, i64>` (`min_output_area = 1e-6`, `clean_result = true`), then run closed-ring Ramer-Douglas-Peucker (`RDP`) simplification (splitting at the farthest antipodal vertex pair before running standard `RDP` with tolerance `min(0.005, config.segment_length_mm * 0.05) mm`).
         *   Validate `cut_polygon` has `shapes.len() == 1 && shapes[0].len() == 1` and `area > unoffset_area` when `kerf_mm > 0.0`. On `bleed_polygon`, keep the outer contour (`shape[0]`) of the positive-area shape containing a sample interior point of the healed unoffset polygon (allowing socket-bridging internal holes `shape[1..]` to drop cleanly) and verify `area > unoffset_area` when `print_bleed_mm > 0.0`; emit a `Warning` notice if `config.print_bleed_mm < config.kerf_mm / 2.0`. Fail on socket collapse naming piece `(row, col)` and `id`.
-    *   Add Phase 2 unit tests (`#[cfg(test)]`) covering `ingest`, `stage1`, and `stage2`: `1.0 mm` bounded-diameter clustering, `mm`-space `<rect>` rotation rejection & `1 x 1` cell overlap checks, `QuadBez::to_cubic()`, `2.0 mm` endpoint snapping with handle translation, multi-edge corner ambiguity rejection, clockwise horizontal/vertical edge splicing with elided `<= 1e-4 mm` leads, `FillRule::Positive` healing of cross-edge overshoot ears, `OutlineOffset` `LineJoin::Round`, zero-offset short-circuiting, `print_bleed < kerf / 2` warning, and `kurbo::flatten` curve bounds.
+    *   Add Phase 2 unit tests (`#[cfg(test)]`) covering `ingest`, `stage1`, and `stage2`: `1.0 mm` bounded-diameter clustering, `mm`-space `<rect>` rotation rejection & `1 x 1` cell overlap checks, `QuadBez::raise()`, `2.0 mm` endpoint snapping with handle translation, multi-edge corner ambiguity rejection, clockwise horizontal/vertical edge splicing with elided `<= 1e-4 mm` leads, `FillRule::Positive` healing of cross-edge overshoot ears, `OutlineOffset` `LineJoin::Round`, zero-offset short-circuiting, `print_bleed < kerf / 2` warning, and `kurbo::flatten` curve bounds.
 
-##### 9. `src/puzzle-gen/src/lib.rs` (Modify)
+##### 9. [`src/puzzle-gen/src/lib.rs`](../../src/puzzle-gen/src/lib.rs) (Modify)
 *   **Type / Scope:** Rust Library Root (Phase 2 Incremental Exports)
 *   **Proposed Changes:**
     *   Append `pub mod ingest; pub mod stage1; pub mod stage2;` so `cargo check` and `cargo test -p puzzle-gen --lib` compile and run Phase 1 and Phase 2 unit tests.
 
 #### Phase 3: Pagination, SVG Serialization, CLI & Integration Suite
 
-##### 10. `src/puzzle-gen/src/paginate.rs` (Create)
+##### 10. [`src/puzzle-gen/src/paginate.rs`](../../src/puzzle-gen/src/paginate.rs) (Create)
 *   **Type / Scope:** Rust Pagination & Vector Registration Digit Module
 *   **Proposed Changes:**
     *   Define static `[0, 1] x [0, 1]` single-stroke polyline glyph tables for `'0'..='9'`:
@@ -458,7 +458,7 @@ Files are organized into three incremental phases so `cargo check` and `cargo te
         *   Assign slots in row-major order on `(margin_mm, margin_mm + 6.0)`-origin grids (`slot_center_mm = (margin_mm + col * (slot_w_mm + piece_spacing_mm) + slot_w_mm / 2.0, margin_mm + 6.0 + row * (slot_h_mm + piece_spacing_mm) + slot_h_mm / 2.0)`, `offset_mm = slot_center_mm - cut_aabb_mm.center()`) and verify piece count preservation, margin containment (`1e-4 mm` tolerance), and `>= piece_spacing_mm - 1e-4 mm` clearance.
     *   Add Phase 3 unit tests (`#[cfg(test)]`) verifying L-tick vs. digit non-overlap, corner-band containment under `margin: "0mm"`, multi-digit `num_w` scaling, `page_cols * page_rows < 1` diagnostics, and `compute_slot_bounds` symmetry.
 
-##### 11. `src/puzzle-gen/src/svg_emit.rs` (Create)
+##### 11. [`src/puzzle-gen/src/svg_emit.rs`](../../src/puzzle-gen/src/svg_emit.rs) (Create)
 *   **Type / Scope:** Rust Stage SVG Projection Module
 *   **Proposed Changes:**
     *   Define fixed root `<svg>` namespaces (`xmlns="http://www.w3.org/2000/svg"`, `xmlns:svg="http://www.w3.org/2000/svg"`, `xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"`, `xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"`, and `xmlns:xlink="http://www.w3.org/1999/xlink"` on Stages 1–3; omit `xmlns:xlink` on Stage 4) and `fmt_coord(val, unit)` (`6` decimals for `In`/`Cm`, `4` for `Mm`/`Px`). Always emit explicit unit suffixes (`mm`, `cm`, `in`, `px`) on root `<svg>` `width` and `height` attributes alongside unitless `viewBox` coordinates in `doc_unit` (Stages 1–3) or `page_unit` (Stage 4).
@@ -471,19 +471,19 @@ Files are organized into three incremental phases so `cargo check` and `cargo te
         *   Call `paginate::compute_slot_bounds(kerfed)` to obtain `(slot_w_mm, slot_h_mm)`, space grid cells at pitch `(slot_w_mm + config.piece_spacing_mm, slot_h_mm + config.piece_spacing_mm)` starting from grid origin `(label_margin_mm, label_margin_mm)` (`cell_center_mm = (8.0 + col * pitch_w + slot_w_mm / 2.0, 8.0 + row * pitch_h + slot_h_mm / 2.0)`, `translate_mm = cell_center_mm - cut_aabb_mm.center()`), expand `width`/`height`/`viewBox` in `doc_unit` with `8.0 mm` bottom/right padding, emit shared `<defs>` pattern, wrap `<g transform="translate(dx_doc, dy_doc)"><path id="piece-r{row}-c{col}" ... /></g>` inside `Pieces` (`0.1 mm` `#000000` stroke, `url(#puzzle-pattern)` fill), and emit aligned `GridLabels`.
     *   Implement `emit_stage3(kerfed: &KerfedGrid, layout: &PaginatedLayout, config: &Config) -> String`:
         *   Project into `doc_unit`, emit `<sodipodi:namedview inkscape:document-units="...">` with `<inkscape:page x="(p-1)*page_w_doc" y="0" width="page_w_doc" height="page_h_doc" id="page<p>" />` and root `<svg>` sized to page 1, and emit `<defs>` (`#puzzle-image` + `#puzzle-pattern`).
-        *   Emit `<g inkscape:groupmode="layer" id="layer-print-pieces" inkscape:label="PrintPieces">` with `<g transform="translate((p-1)*page_w_doc + offset_x_doc, offset_y_doc)"><path id="piece-r{row}-c{col}" style="fill:url(#puzzle-pattern);stroke:none" d="<bleed_polygon>" /></g>`.
-        *   Emit `<g inkscape:groupmode="layer" id="layer-page-numbers" inkscape:label="PageNumbers">` with corner stroke `<path>`s translated horizontally by `(p - 1) * page_w_doc` (`fill:none;stroke:#000000;stroke-width:<0.1mm_doc>`).
+        *   Emit `<g inkscape:groupmode="layer" id="layer-print-pieces" inkscape:label="PrintPieces">` with `<g transform="translate((p-1)*page_w_doc + offset_x_doc, offset_y_doc)"><path id="piece-r{row}-c{col}" style="fill:url(#puzzle-pattern);stroke:none;fill-rule:nonzero" d="<bleed_polygon>" /></g>`.
+        *   Emit `<g inkscape:groupmode="layer" id="layer-page-numbers" inkscape:label="PageNumbers">` with corner stroke `<path>`s translated horizontally by `(p - 1) * page_w_doc` (`fill:none;stroke:#000000;stroke-width:<0.1mm_doc>;stroke-linecap:round;stroke-linejoin:round`).
     *   Implement `emit_stage4_page(kerfed: &KerfedGrid, page: &PagePlan, config: &Config) -> String`:
-        *   Project into `config.page_unit`, emit `<sodipodi:namedview inkscape:document-units="...">`, size root `<svg>` to `page_w_out x page_h_out`, omit `<defs>`, `<image>`, `<pattern>`, and all `transform` attributes, and emit baked page-local `<path>` elements across `<g inkscape:groupmode="layer" id="layer-cut" inkscape:label="Cut">` (`id="piece-r{row}-c{col}"`, `fill:none;stroke:#000000;stroke-width:<0.1mm_page_unit>`) and `<g inkscape:groupmode="layer" id="layer-page-numbers" inkscape:label="PageNumbers">` (`fill:none;stroke:<config.score_color>;stroke-width:<0.1mm_page_unit>`).
+        *   Project into `config.page_unit`, emit `<sodipodi:namedview inkscape:document-units="...">`, size root `<svg>` to `page_w_out x page_h_out`, omit `<defs>`, `<image>`, `<pattern>`, and all `transform` attributes, and emit baked page-local `<path>` elements across `<g inkscape:groupmode="layer" id="layer-cut" inkscape:label="Cut">` (`id="piece-r{row}-c{col}"`, `fill:none;stroke:#000000;stroke-width:<0.1mm_page_unit>`) and `<g inkscape:groupmode="layer" id="layer-page-numbers" inkscape:label="PageNumbers">` (`fill:none;stroke:<config.score_color>;stroke-width:<0.1mm_page_unit>;stroke-linecap:round;stroke-linejoin:round`).
     *   Add Phase 3 unit tests (`#[cfg(test)]`) verifying `<sodipodi:namedview>`, `<defs>` `xlink:href` structure, `Pieces`/`GridLabels`/`PrintPieces`/`Cut`/`PageNumbers` layers, Stage 3 `PageNumbers` `(p - 1) * page_w_doc` shifts, and absence of `<defs>`/`<image>`/`<pattern>`/`transform` in Stage 4.
 
-##### 12. `src/puzzle-gen/src/lib.rs` (Modify)
+##### 12. [`src/puzzle-gen/src/lib.rs`](../../src/puzzle-gen/src/lib.rs) (Modify)
 *   **Type / Scope:** Rust Library Root (Final Phase 3 Exports & Pipeline Entrypoint)
 *   **Proposed Changes:**
     *   Add `pub mod paginate; pub mod svg_emit;`.
     *   Provide `pub fn run_pipeline(svg_xml: &str, config: &Config, strict: bool, notices: &mut Vec<PipelineNotice>) -> Result<PipelineArtifacts, PipelineError>` running Stage 0 -> Stage 1 -> Stage 2 -> Pagination in memory, preserving any valid `SplicedPuzzle` / `KerfedGrid` inside `PipelineError` on downstream failure without eagerly serializing XML strings.
 
-##### 13. `src/puzzle-gen/src/main.rs` (Modify)
+##### 13. [`src/puzzle-gen/src/main.rs`](../../src/puzzle-gen/src/main.rs) (Modify)
 *   **Type / Scope:** Rust CLI Entrypoint & File Lifecycle Manager
 *   **Proposed Changes:**
     *   Parse CLI args via `clap`; validate `--prefix` (`!is_empty() && prefix != "." && prefix != ".." && !contains(['/', '\\'])`); read `--config` if passed and call `Config::from_yaml`.
@@ -492,18 +492,18 @@ Files are organized into three incremental phases so `cargo check` and `cargo te
     *   Under `--dry-run`, print structured `key=value` summary lines (`grid=RxC`, `matched_tabs=M`, `missing_tabs=K`, `slot_mm=WxH`, `pages=P`, `page_grid=CxR`) to `stdout` without creating `--output-dir` or calling `svg_emit`.
     *   Otherwise scan `--output-dir` (ignoring `ErrorKind::NotFound`), detect existing Stage 4 files via pure `std` string prefix/suffix + base-10 non-zero-leading-digit matching (`<prefix>-stage4-page<K>.svg`), abort on collisions when `--overwrite` is false, create `--output-dir`, lazily call `svg_emit::emit_stage1..4` one stage at a time and persist each via `tempfile::NamedTempFile::new_in`, prune leftover `K > pages.len()` files under `--overwrite`, and print summary + written paths to `stdout`.
 
-##### 14. `src/puzzle-gen/examples/default-config.yaml` (Create)
+##### 14. [`src/puzzle-gen/examples/default-config.yaml`](../../src/puzzle-gen/examples/default-config.yaml) (Create)
 *   **Type / Scope:** Example YAML Configuration
 *   **Proposed Changes:**
     *   Add a commented default configuration file (`version: 1`, `page_size: "6in x 6in"`, `page_unit: "mm"`, `margin: "0.25in"`, `kerf: "0.18mm"`, `segment_length: "1 kerf"`, `piece_spacing: "1 kerf"`, `print_bleed: "1 kerf"`, `score_color: "#0000ff"`).
 
-##### 15. `src/puzzle-gen/tests/integration_pipeline.rs` (Create)
+##### 15. [`src/puzzle-gen/tests/integration_pipeline.rs`](../../src/puzzle-gen/tests/integration_pipeline.rs) (Create)
 *   **Type / Scope:** Rust Integration & CLI Regression Suite
 *   **Proposed Changes:**
-    *   Test `rainy-day-puzzle-4x4-25piece-step0-piece-shape.svg`: fail in strict mode citing missing internal edge `((2, 0), (3, 0))` along `y = 2.4in, x in [0, 0.8in]`, and pass under `--no-strict` emitting 1 missing-edge warning, preserving `style="image-rendering:optimizeSpeed"` on `<image id="puzzle-image">`, and 25 closed healed contours (confirming `FillRule::Positive` drops `path2`/`path10` exterior overshoot ears cleanly).
+    *   Test `rainy-day-puzzle-4x4-25piece-step0-piece-shape.svg`: fail in strict mode citing missing internal edge `((2, 0), (3, 0))` along `y = 2.4000in, x in [0.0000, 0.8000]in`, and pass under `--no-strict` emitting 1 missing-edge warning, preserving `style="image-rendering:optimizeSpeed"` on `<image id="puzzle-image">`, and 25 closed healed contours (confirming `FillRule::Positive` drops `path2`/`path10` exterior overshoot ears cleanly).
     *   Test synthetic complete 5x5 SVG across Stages 1–4: verify `<sodipodi:namedview>` units, `<image x="0" y="0">` + 4 `<use>` tiles with `xlink:href`, `preserveAspectRatio="none"`, `Pieces` and `GridLabels` layers, `PrintPieces` vs. `PageNumbers`, zero `<defs>`/`<image>`/`<pattern>`/`transform` on Stage 4, `Cut` vs. `PageNumbers` colors, unconditional `PageNumbers` `<path>` parity within `1.5e-4 mm` between Stage 3 and Stage 4, and piece `<path>` parity within `1.5e-4 mm` when `print_bleed == kerf / 2`.
     *   Test unit conversions (`mm`, `cm`, `in`, `px`) and `<N> kerf` expressions end to end through `run_pipeline` and Stage 4 outputs.
-    *   Test bounded early snapping and edge cases: `1.0 mm` bounded-diameter `<rect>` perturbation, `2.0 mm` joint tab endpoint misalignment with handle translation, multi-edge ambiguity rejection vs. valid corner-adjacent full-edge tab, `Quadratic` (`to_cubic`) & `Arc` parsing, sub-`0.05 mm` stray paths, rotated `<rect>` / `<image>` rejection, `bleed_polygon` socket bridging, `print_bleed < kerf / 2` warning, zero `kerf` short-circuiting, and `serde-saphyr` duplicate-key, unknown-key, and unquoted `#RRGGBB` errors.
+    *   Test bounded early snapping and edge cases: `1.0 mm` bounded-diameter `<rect>` perturbation, `2.0 mm` joint tab endpoint misalignment with handle translation, multi-edge ambiguity rejection vs. valid corner-adjacent full-edge tab, `Quadratic` (`raise`) & `Arc` parsing, sub-`0.05 mm` stray paths, rotated `<rect>` / `<image>` rejection, `bleed_polygon` socket bridging, `print_bleed < kerf / 2` warning, zero `kerf` short-circuiting, and `serde-saphyr` duplicate-key, unknown-key, and unquoted `#RRGGBB` errors.
     *   Test CLI binary invocations in isolated `tempfile::tempdir()` temporary directories: `--dry-run`, `--output-dir`, `--prefix`, `--emit-debug-on-error` (including notice emission on failure and non-pruning of Stage 4 files), collision failure without `--overwrite`, write-before-prune stale page deletion with `--overwrite`, and `page_cols * page_rows < 1` error messages.
 
 ### Verification Plan

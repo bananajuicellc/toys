@@ -542,3 +542,158 @@ fn cli_end_to_end_dry_run_collisions_overwrite_pruning_and_debug_emit() {
 
     let _ = Path::new(".").exists();
 }
+
+fn wrap_mm_svg(image_attrs: &str, pieces_body: &str, tabs_body: &str) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="40mm" height="40mm" viewBox="0 0 40 40" version="1.1"
+     xmlns="http://www.w3.org/2000/svg"
+     xmlns:svg="http://www.w3.org/2000/svg"
+     xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+     xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+     xmlns:xlink="http://www.w3.org/1999/xlink">
+  <sodipodi:namedview id="namedview1" inkscape:document-units="mm"/>
+  <g inkscape:groupmode="layer" inkscape:label="Image">
+    <image id="img1" x="0" y="0" width="40" height="40" {image_attrs} xlink:href="{PNG_1X1}"/>
+  </g>
+  <g inkscape:groupmode="layer" inkscape:label="Pieces">
+    {pieces_body}
+  </g>
+  <g inkscape:groupmode="layer" inkscape:label="Tabs">
+    {tabs_body}
+  </g>
+</svg>"#
+    )
+}
+
+fn ring_area_mm2(pts: &[kurbo::Point]) -> f64 {
+    let mut sum = 0.0;
+    for i in 0..pts.len() {
+        let a = pts[i];
+        let b = pts[(i + 1) % pts.len()];
+        sum += a.x * b.y - b.x * a.y;
+    }
+    0.5 * sum
+}
+
+#[test]
+fn bounded_early_snapping_and_edge_cases() {
+    // 1. 1.0 mm bounded-diameter <rect> perturbation, 2.0 mm joint tab misalignment with handle translation,
+    //    corner-adjacent full-edge tab, Quadratic (raise) & Arc tab curves, and sub-0.05 mm stray path filtering.
+    let rects_2x2 = r#"
+    <rect id="r00" x="0.0" y="0.0" width="19.6" height="19.8"/>
+    <rect id="r01" x="20.0" y="0.0" width="20.0" height="20.2"/>
+    <rect id="r10" x="0.0" y="20.3" width="20.3" height="19.7"/>
+    <rect id="r11" x="19.9" y="19.9" width="20.1" height="20.1"/>
+"#;
+    let tabs_2x2 = r#"
+    <path id="stray1" d="M 3.0 3.0 L 3.01 3.01 Z"/>
+    <path id="t_h0_snap" d="M 5.0 21.5 C 5.0 25.0 15.0 25.0 15.0 18.5"/>
+    <path id="t_h1_corner_full" d="M 20.0 20.0 C 25.0 23.0 35.0 23.0 40.0 20.0"/>
+    <path id="t_v0_quad" d="M 20.0 5.0 Q 25.0 10.0 20.0 15.0"/>
+    <path id="t_v1_arc" d="M 20.0 25.0 A 5.0 5.0 0 0 1 20.0 35.0"/>
+"#;
+    let svg = wrap_mm_svg("", rects_2x2, tabs_2x2);
+    let cfg = Config::default();
+    let mut notices = Vec::new();
+    let artifacts = run_pipeline(&svg, &cfg, true, &mut notices).unwrap();
+    assert_eq!(artifacts.kerfed.rows, 2);
+    assert_eq!(artifacts.kerfed.cols, 2);
+    assert_eq!(artifacts.kerfed.matched_tabs, 4);
+    assert_eq!(artifacts.kerfed.missing_tabs, 0);
+    assert!(
+        notices
+            .iter()
+            .any(|n| n.code == "STRAY_PATH_FILTERED" && n.message.contains("stray1"))
+    );
+    // Verify Quadratic and Arc were normalized to cubic curves and snapped handle moved on r00.
+    let r00 = &artifacts.spliced.pieces[0];
+    assert!(
+        r00.path_mm
+            .elements()
+            .iter()
+            .any(|el| matches!(el, kurbo::PathEl::CurveTo(_, _, _)))
+    );
+    let has_snapped_handle = r00.path_mm.elements().iter().any(|el| match *el {
+        kurbo::PathEl::CurveTo(c1, c2, _) => (c1.y - 23.5).abs() < 0.5 || (c2.y - 23.5).abs() < 0.5,
+        _ => false,
+    });
+    assert!(
+        has_snapped_handle,
+        "expected tangency-preserving handle translation on snapped curve"
+    );
+
+    // 2. Multi-edge corner ambiguity rejection.
+    let ambig_svg = wrap_mm_svg(
+        "",
+        r#"
+    <rect id="r00" x="0" y="0" width="20" height="20"/>
+    <rect id="r01" x="20" y="0" width="20" height="20"/>
+    <rect id="r10" x="0" y="20" width="20" height="20"/>
+    <rect id="r11" x="20" y="20" width="20" height="20"/>
+"#,
+        r#"<path id="ambig" d="M 18.5 20.0 L 20.0 21.5"/>"#,
+    );
+    let ambig_err = run_pipeline(&ambig_svg, &cfg, false, &mut Vec::new()).unwrap_err();
+    assert!(ambig_err.to_string().contains("ambig"));
+
+    // 3. Rotated <rect> and rotated <image> rejection.
+    let rot_rect_svg = wrap_mm_svg(
+        "",
+        r#"<rect id="rot_rect" x="0" y="0" width="20" height="20" transform="rotate(15 10 10)"/>"#,
+        "",
+    );
+    let rot_rect_err = run_pipeline(&rot_rect_svg, &cfg, true, &mut Vec::new()).unwrap_err();
+    assert!(rot_rect_err.to_string().contains("rot_rect"));
+
+    let rot_img_svg = wrap_mm_svg(
+        r#"transform="rotate(5)""#,
+        r#"<rect id="r00" x="0" y="0" width="40" height="40"/>"#,
+        "",
+    );
+    let rot_img_err = run_pipeline(&rot_img_svg, &cfg, true, &mut Vec::new()).unwrap_err();
+    assert!(rot_img_err.to_string().contains("img1"));
+
+    // 4. bleed_polygon socket bridging, print_bleed < kerf / 2 warning, and zero kerf short-circuiting.
+    let narrow_socket_svg = wrap_mm_svg(
+        "",
+        r#"
+    <rect id="r00" x="0" y="0" width="40" height="20"/>
+    <rect id="r10" x="0" y="20" width="40" height="20"/>
+"#,
+        r#"<path id="t_narrow" d="M 19.0 20.0 L 19.75 18.0 L 18.0 15.0 L 22.0 15.0 L 20.25 18.0 L 21.0 20.0"/>"#,
+    );
+    let zero_kerf_cfg = Config::from_yaml(Some(
+        "version: 1\nkerf: \"0mm\"\nsegment_length: \"0.18mm\"\nprint_bleed: \"0.6mm\"\n",
+    ))
+    .unwrap();
+    let bridged = run_pipeline(&narrow_socket_svg, &zero_kerf_cfg, true, &mut Vec::new()).unwrap();
+    assert!(
+        ring_area_mm2(&bridged.kerfed.pieces[1].bleed_polygon)
+            > ring_area_mm2(&bridged.kerfed.pieces[1].cut_polygon)
+    );
+
+    let small_bleed_cfg = Config::from_yaml(Some(
+        "version: 1\nkerf: \"0.20mm\"\nprint_bleed: \"0.05mm\"\n",
+    ))
+    .unwrap();
+    let mut small_bleed_notices = Vec::new();
+    let _ = run_pipeline(
+        &narrow_socket_svg,
+        &small_bleed_cfg,
+        true,
+        &mut small_bleed_notices,
+    )
+    .unwrap();
+    assert!(
+        small_bleed_notices
+            .iter()
+            .any(|n| n.severity == NoticeSeverity::Warning && n.code == "BLEED_LESS_THAN_HALF_KERF")
+    );
+
+    // 5. serde-saphyr duplicate-key, unknown-key, and unquoted #RRGGBB errors.
+    assert!(Config::from_yaml(Some("kerf: \"0.18mm\"\nkerf: \"0.20mm\"\n")).is_err());
+    assert!(Config::from_yaml(Some("unknown_key: \"0.18mm\"\n")).is_err());
+    let color_err = Config::from_yaml(Some("score_color: #0000ff\n")).unwrap_err();
+    assert!(color_err.to_string().contains("\"#RRGGBB\""));
+}

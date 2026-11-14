@@ -358,35 +358,14 @@ fn simplify_closed_ring_rdp(ring: &[Point], tol: f64) -> Vec<Point> {
     // Find farthest antipodal vertex pair to split the closed ring cleanly.
     let (mut idx_a, mut idx_b) = (0usize, n / 2);
     let mut best_d2 = -1.0;
-    if n <= 2048 {
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let d2 = ring[i].distance_squared(ring[j]);
-                if d2 > best_d2 {
-                    best_d2 = d2;
-                    idx_a = i;
-                    idx_b = j;
-                }
-            }
-        }
-    } else {
-        for i in 0..n {
-            let d2 = ring[0].distance_squared(ring[i]);
-            if d2 > best_d2 {
-                best_d2 = d2;
-                idx_b = i;
-            }
-        }
-        best_d2 = -1.0;
-        for i in 0..n {
-            let d2 = ring[idx_b].distance_squared(ring[i]);
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let d2 = ring[i].distance_squared(ring[j]);
             if d2 > best_d2 {
                 best_d2 = d2;
                 idx_a = i;
+                idx_b = j;
             }
-        }
-        if idx_a > idx_b {
-            std::mem::swap(&mut idx_a, &mut idx_b);
         }
     }
 

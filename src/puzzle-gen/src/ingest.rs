@@ -553,6 +553,7 @@ fn extract_rects(
 
 fn cluster_coords(mut coords: Vec<f64>) -> Vec<f64> {
     coords.sort_by(f64::total_cmp);
+    coords.dedup();
     let mut lines = Vec::new();
     let mut cluster_start = coords[0];
     let mut sum = coords[0];
